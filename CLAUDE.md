@@ -127,9 +127,11 @@ GUI 关闭后输出 JSON（例）：
 | `action` 字段 | 操作 |
 |------------|------|
 | `process_chapter` | **只处理 `current_session_videos` 列表中的视频**（不多不少），每个完整执行流程 A 全部 6 步；若 `current_session_index + 1 < total_sessions` → 提示用户**重新运行 GUI 启动器**；若是最后一 Session → **按下方流程 C 步骤执行章节综合（多轮）** |
-| `synthesis` | 直接执行流程 C：先调用 `read_chapter_summaries` + `scan_chapter_completeness`，再按 SKILL.md Steps C2-C4 多轮生成学习包（outline→synthesis→exercises→anki，每轮独立响应保存后等用户确认，严禁合并为一次响应） |
+| `synthesis` | 直接执行流程 C：以 JSON 中 `chapter_output_dir` 字段作为 CHAPTER_DIR，调用 `read_chapter_summaries(chapter_output_dir)` + `scan_chapter_completeness(chapter_output_dir)`，再按 SKILL.md Steps C2-C4 多轮生成学习包（outline→synthesis→exercises→anki，每轮独立响应保存后等用户确认，严禁合并为一次响应） |
 | `manual` | 读取 `SKILL.md` 并按字面出现的询问引导用户 |
 | `cancelled` | 用户取消，不执行任何操作 |
+
+> ⚠️ `force_reprocess: true`（GUI ♻ 重新处理按钮）：表示 `current_session_videos` 中包含原先已完成的视频，必须强制重新生成其知识文档（覆盖旧文件），并重新调用 `update_knowledge_graph` 更新图谱。忽略 `force_reprocess` 会导致图谱与知识文档不一致。
 
 **Session 处理完成后**：
 1. 若 `current_session_index + 1 < total_sessions` → 告知用户"Session {current_session_index+1}/{total_sessions} 已完成，请**重新运行 GUI 启动器**继续下一 Session"（GUI 启动时自动扫描最新进度，无需手动维护状态）
@@ -174,7 +176,7 @@ GUI 关闭后输出 JSON（例）：
    - `read_chapter_summaries(chapter_dir)` → 获取所有视频摘要与知识图谱数据
    - `scan_chapter_completeness(chapter_dir)` → 生成 `chapter_completeness_audit.md`（兜底机制2）
 
-2. **Step C2（策略选择）**：根据知识点总数选择对话轮次（≤15点→跳过outline，直接4轮；16-40点→5轮；>40点→N+4轮）
+2. **Step C2（策略选择）**：根据知识点总数选择 Pass 数（总轮数含 C1 前置步骤）：≤15点→3轮Pass+C1=共4轮；16-40点→4轮Pass+C1=共5轮；>40点→(N+4)轮Pass+C1=共N+5轮
 
 3. **Step C3（多轮生成）**：加载 `prompts/C_chapter_synthesis.md`，按以下 Pass 顺序各占一轮对话依次执行：
    - `PASS_MODE = "outline"`（可选，标准/大型章节）→ 保存 `chapter_outline.json`

@@ -937,6 +937,12 @@ async def _check_preprocessing_status(args: dict) -> list[TextContent]:
     if is_segmented and not srt_exists:
         srt_exists = any(prep_dir.glob(f"{safe_stem}_part*.srt"))
 
+    # 计算实际 SRT 文件路径列表（分段视频有多个分段 SRT）
+    if is_segmented:
+        actual_srt_paths = sorted([str(p) for p in prep_dir.glob(f"{safe_stem}_part*.srt")])
+    else:
+        actual_srt_paths = [paths["srt"]] if Path(paths["srt"]).exists() else []
+
     # 帧目录也检查子目录（分段帧存放在 frames/{seg_stem}/）
     if not frame_list and frames_dir.exists():
         for sub in frames_dir.iterdir():
@@ -955,7 +961,9 @@ async def _check_preprocessing_status(args: dict) -> list[TextContent]:
         "artifacts": {
             "srt": {
                 "path": paths["srt"],
-                "exists": srt_exists
+                "exists": srt_exists,
+                "srt_paths": actual_srt_paths,
+                "note": "分段视频（is_segmented=true）请使用 srt_paths 列表逐段读取字幕；非分段视频直接使用 path" if is_segmented else ""
             },
             "words_json": {
                 "path": paths["words_json"],

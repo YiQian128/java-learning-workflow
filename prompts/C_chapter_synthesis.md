@@ -65,7 +65,9 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ---
 
-### 轻量章节（知识点 ≤ 15 个 / 预估产物 ≤ 8000 字）— 四轮对话
+### 轻量章节（知识点 ≤ 15 个 / 预估产物 ≤ 8000 字）— 三轮 Pass
+
+> 💡 **本提示词内的三轮 Pass**，不含 C1 前置工具调用（`read_chapter_summaries` + `scan_chapter_completeness`，在 SKILL.md Step C1 中已完成）。
 
 - 对话 1：PASS_MODE = "synthesis"（跳过 Outline Pass，在 synthesis pass 内执行 Stage 0 分类门）→ 保存 CHAPTER_SYNTHESIS
 - 对话 2：PASS_MODE = "exercises" → 保存 CHAPTER_EXERCISES
@@ -75,7 +77,9 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ---
 
-### 标准章节（知识点 16-40 个 / 预估产物 8000-20000 字）— 五轮对话
+### 标准章节（知识点 16-40 个 / 预估产物 8000-20000 字）— 四轮 Pass
+
+> 💡 **本提示词内的四轮 Pass**，不含 C1 前置工具调用（已在 SKILL.md Step C1 完成）。
 
 - 对话 1：PASS_MODE = "outline" → 生成并保存 chapter_outline.json（Token ~8-12k）
 - 对话 2：PASS_MODE = "synthesis" → 生成并保存 CHAPTER_SYNTHESIS（超 20 个知识点时分节写入，见 Pass 2a）
@@ -84,7 +88,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ---
 
-### 大型章节（知识点 > 40 个 / 预估产物 > 20000 字）— N+4 轮对话
+### 大型章节（知识点 > 40 个 / 预估产物 > 20000 字）— N+4 轮 Pass（含 C1 共 N+5 轮）
 
 **对话 1-N（Group Summaries）**：
 - 按内容关联度分组（每组预估约 5000 字），同一话题族的视频尽量归入同组
@@ -359,7 +363,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ---
 
-*练习题 → [CHAPTER_EXERCISES_{chapter}.md](./CHAPTER_EXERCISES_{chapter}.md)*
+*练习题 → [CHAPTER_EXERCISES_{chapter_dir_name}.md](./CHAPTER_EXERCISES_{chapter_dir_name}.md)*
 ```
 
 #### 写作原则（按重要性排序）

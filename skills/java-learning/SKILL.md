@@ -427,13 +427,15 @@ P5（禁用）    不得直接引用
 
 根据章节知识体量估算决定对话轮次（同等视频数，内容量可能差 3 倍）：
 
-  轻量（知识点 ≤ 15 / 预估产物 ≤ 8000 字）    → 跳过 Outline Pass，直接四轮：2a→2b→2c
-  标准（知识点 16-40 / 预估产物 8000-20000 字）→ 五轮：
+> 💡 以下"总轮数"含 C1 前置工具调用（Step C1），C_chapter_synthesis.md 内的实际 Pass 数 = 总轮数 - 1
+
+  轻量（知识点 ≤ 15 / 预估产物 ≤ 8000 字）    → 跳过 Outline Pass，3 轮 Pass（含 C1 共四轮）：synthesis → exercises → anki
+  标准（知识点 16-40 / 预估产物 8000-20000 字）→ 4 轮 Pass（含 C1 共五轮）：
         对话 1：PASS_MODE = "outline"（生成 chapter_outline.json）
         对话 2：PASS_MODE = "synthesis"（Pass 2a，超 20 知识点时分节写入）
         对话 3：PASS_MODE = "exercises"（Pass 2b）
         对话 4：PASS_MODE = "anki"（Pass 2c）
-  大型（知识点 > 40 / 预估产物 > 20000 字）   → N+4 轮（Group Summaries → Outline → 2a→2b→2c）
+  大型（知识点 > 40 / 预估产物 > 20000 字）   → N+4 轮 Pass（含 C1 共 N+5 轮）：Group Summaries → Outline → synthesis → exercises → anki
 
 知识点数量：来自 read_chapter_summaries 各视频的 depth≥1 概念汇总。
 ```

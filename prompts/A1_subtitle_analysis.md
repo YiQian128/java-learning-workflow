@@ -37,6 +37,11 @@ SUBTITLE_TEXT:
 ---
 {SUBTITLE_TEXT}
 ---
+
+> ⚠️ **字幕来源说明**（调用本提示词前获取 SUBTITLE_TEXT 的方式）：
+> - **非分段视频**（`is_segmented=false`）：读取 `check_preprocessing_status` 返回的 `artifacts.srt.path`
+> - **分段视频**（`is_segmented=true`）：`artifacts.srt.path` 可能不存在，应逐一读取 `artifacts.srt.srt_paths` 列表中的各段 SRT 文件并拼接为 SUBTITLE_TEXT；`SEGMENT_INDEX` 需设为当前段序号（如 "1/3"）
+
 WORDS_JSON_AVAILABLE: {true/false，词级时间戳是否可用}
 KNOWLEDGE_GRAPH_DATA: {query_knowledge_graph(concept_ids=[...]) 的返回内容，JSON 格式}
                       ← 在调用本 Stage 1 前，AI 助手需先根据视频文件名 + 目录预判概念范围，
