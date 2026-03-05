@@ -256,6 +256,8 @@ P5（禁用）    不得直接引用
    - `manual` → 犹如旧版文字问答模式，读取 SKILL.md 并引导用户选择
    - `cancelled` → 用户取消，不执行任何操作
 
+   > ⚠️ JSON 中含 `force_reprocess: true`（♻ 重新处理按钮）时：`current_session_videos` 中包含已完成的视频，必须重新生成其知识文档（覆盖旧的 `knowledge_*.md`）并重新调用 `update_knowledge_graph`。仅影响 Flow A 产物，章节学习包（CHAPTER_SYNTHESIS / EXERCISES / ANKI）需之后另行用「⚑ 生成学习包」重新生成。
+
    **Session 处理完成后**：
    1. 若 `current_session_index + 1 < total_sessions` → 告知用户"Session {current_session_index+1}/{total_sessions} 已完成，请**重新运行 GUI 启动器**继续下一 Session"（GUI 启动时自动扫描最新进度，无需手动维护状态）
    2. 若是最后一个 Session → 直接触发流程 C
@@ -304,7 +306,10 @@ P5（禁用）    不得直接引用
   SEGMENT_INDEX        = {如 "1/3"，非分段时为 null}
   WORDS_JSON_AVAILABLE = {true/false}（对应 check_preprocessing_status 返回的 artifacts.words_json.exists）
   KNOWLEDGE_GRAPH_DATA = query_knowledge_graph 的返回内容（首次则传空）
-  + 文件名、目录、字幕内容（字幕从 check_preprocessing_status 返回的 artifacts.srt.path 读取）
+  + 文件名、目录、字幕内容：
+      非分段视频（is_segmented=false）：读取 artifacts.srt.path
+      分段视频（is_segmented=true）：逐段读取 artifacts.srt.srt_paths 列表中的各文件并拼接为 SUBTITLE_TEXT
+      （srt_paths 由 check_preprocessing_status 工具返回，path 在分段视频中可能不存在）
 输出并保存（VIDEO_STEM 中特殊字符会被替换为 _）：
   - {preprocessing_dir}/{safe_stem}_topics.json
       ← 话题清单，含：processing_mode、implicit_concepts、reference_map

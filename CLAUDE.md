@@ -118,7 +118,8 @@ GUI 关闭后输出 JSON（例）：
   "current_session_index": 0,
   "current_session_videos": ["视频1", "视频2", "视频3"],
   "current_session_est_tokens": 68400,
-  "is_resume": false
+  "is_resume": false,
+  "force_reprocess": false
 }
 ```
 
@@ -152,7 +153,7 @@ GUI 关闭后输出 JSON（例）：
 2. 调用 MCP 工具获取上下文（视频元数据 + 预处理状态 + **知识图谱范围查询**）
 3. 加载 `prompts/A1_subtitle_analysis.md` → 字幕分析 + 图谱比对 + **模式判断**（Full/Supplement/DeepDive/Practice）
 4. 加载 `prompts/A2_knowledge_gen.md` → 按模式生成知识文档（唯一产物：`knowledge_*.md`；练习题/Anki 在流程 C 统一生成）
-5. 产物保存到 `portable-gpu-worker/output/{course}/{day}/{video_stem}/`
+5. 产物保存到 `portable-gpu-worker/output/{course}/{day}/{safe_stem}/`（`safe_stem` = 视频文件名中特殊字符替换为 `_` 后的结果）
 6. **调用 `update_knowledge_graph`**（强制，不可省略 — 后续视频模式判断依赖它）
 
 > ❌ **批量处理时严禁的行为**：跳过 Step 2 MCP 调用、跳过 Step 3 Stage 1 分析、合并多个视频一次生成、Step 6 推迟到全部视频处理完后统一调用。每个视频必须独立完整走一遍。
@@ -201,8 +202,8 @@ portable-gpu-worker/output/
 └── {课程文件夹}/                            如：Java基础-视频上/
     └── {章节文件夹}/                        如：day01-Java入门/
         │
-        ├── {video_stem}/                    ← Layer 1：视频级产物（每视频一个）
-        │   ├── knowledge_{stem}.md          ← 唯一视频级产物（Full/Supplement/DeepDive/Practice 之一）
+        ├── {safe_stem}/                    ← Layer 1：视频级产物（每视频一个，safe_stem = 文件名特殊字符替换为 _）
+        │   ├── knowledge_{safe_stem}.md    ← 唯一视频级产物（Full/Supplement/DeepDive/Practice 之一）
         │   └── _preprocessing/              ← 练习题/Anki 在流程 C 章节综合时从零生成，不在视频级生成
         │       ├── *.srt / *_words.json
         │       ├── *_topics.json            ← A1 输出（含处理模式）
