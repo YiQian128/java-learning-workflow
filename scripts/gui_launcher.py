@@ -161,7 +161,7 @@ CLR_SESSION  = "#2a3a5a"
 
 # ── 数据层 ────────────────────────────────────────────────────────────────────
 def _safe_dirname(stem: str) -> str:
-    return re.sub(r'[\\/:*?"<>|]', '_', stem)
+    return re.sub(r'[\\/:*?"<>|]', '_', stem).strip('. ')
 
 def _srt_bytes(video_stem: str, course: str, day: str) -> int:
     """返回视频字幕文件总字节数（用于估算 token 消耗）。"""
