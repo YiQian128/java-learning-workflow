@@ -1,0 +1,16 @@
+# 环境资源（由 1_联网准备 下载，体积大不提交）
+_env/*
+!_env/.gitkeep
+
+# 用户数据（视频、预处理产物，勿提交）
+output/*
+!output/.gitkeep
+videos/*
+!videos/.gitkeep
+
+# 本地令牌（勿提交）
+.env
+
+# Python 缓存
+__pycache__/
+*.py[cod]

@@ -1,0 +1,113 @@
+# 便携式 GPU 预处理包 - 配置（精简版）
+# 运行 0_开始使用.bat → [3] 开始预处理 时可选择模型，此处为默认值
+
+# ─── 在线 API 转写（可选） ────────────────────────────────────────────────────
+# 支持多家提供商，选择一种填写即可；优先级：config 里的 api_key > 对应环境变量。
+#
+# ┌─────────────┬──────────────────────────────────────┬──────────────────────────────────────────┐
+# │ provider    │ 环境变量                              │ 默认模型                                  │
+# ├─────────────┼──────────────────────────────────────┼──────────────────────────────────────────┤
+# │ openai      │ OPENAI_API_KEY                        │ whisper-1（或 gpt-4o-transcribe）         │
+# │ groq        │ GROQ_API_KEY（或 OPENAI_API_KEY）     │ whisper-large-v3-turbo（速度快）           │
+# │ siliconflow │ SILICONFLOW_API_KEY                   │ FunAudioLLM/SenseVoiceSmall（★ 免费）     │
+# │ aliyun      │ DASHSCOPE_API_KEY                     │ paraformer-v2（★ 中文+词级时间戳+免费10h）│
+# │ azure       │ AZURE_OPENAI_API_KEY                  │ whisper（需同时设置 base_url）             │
+# │ assemblyai  │ ASSEMBLYAI_API_KEY                    │ best（需安装: pip install assemblyai）    │
+# │ deepgram    │ DEEPGRAM_API_KEY                      │ nova-3（需安装: pip install deepgram-sdk）│
+# │ custom      │ OPENAI_API_KEY                        │ whisper-1（任意 OpenAI 兼容接口）          │
+# └─────────────┴──────────────────────────────────────┴──────────────────────────────────────────┘
+#
+# 快速切换示例（取消注释对应块即可）：
+#
+#   # SiliconFlow（★ 推荐首选：目前完全免费，中文识别最佳，无时间戳）
+#   provider: "siliconflow"
+#   model: "FunAudioLLM/SenseVoiceSmall"
+#
+#   # 阿里云 Paraformer（★ 综合最优：中文专项+词级时间戳+10h/月免费，需配置 aliyun_oss）
+#   provider: "aliyun"
+#   model: "paraformer-v2"    # 推荐：支持普通话/方言/英文/日韩等
+#                              # paraformer-v1 仅支持中英文
+#
+#   # Groq（有时间戳，$0.04/h，速度228x，全部处理约¥33）
+#   provider: "groq"
+#   model: "whisper-large-v3-turbo"   # 或 whisper-large-v3（质量更高，价格3倍）
+#
+#   # OpenAI 官方
+#   provider: "openai"
+#   model: "whisper-1"         # 或 gpt-4o-transcribe
+#
+#   # AssemblyAI（高准确率，说话人分离，需 pip install assemblyai）
+#   provider: "assemblyai"
+#   model: "best"              # 或 nano（更快更便宜）
+#
+#   # Deepgram（低延迟，需 pip install deepgram-sdk）
+#   provider: "deepgram"
+#   model: "nova-3"
+#
+#   # 自定义 OpenAI 兼容接口（如本地 Ollama、OneAPI 等）
+#   provider: "custom"
+#   base_url: "http://localhost:11434/v1"
+#   model: "whisper"
+
+api:
+  enabled: true
+  provider: "aliyun"        # openai / groq / siliconflow / aliyun / azure / assemblyai / deepgram / custom
+  model: "paraformer-v2"    # 推荐：中文/方言/英日韩，任意采样率，词级时间戳
+  base_url: ""
+  # ⚠️  api_key 请勿在此处填写，使用以下方式之一传入（优先级从高到低）：
+  #   1. 在本目录下创建 .env 文件（不会上传 git），填写对应环境变量
+  #   2. 在操作系统中设置环境变量
+  #   3. 实在不方便时才在此处填写（但请勿提交到 git）
+  #
+  # aliyun   → DASHSCOPE_API_KEY
+  # openai   → OPENAI_API_KEY
+  # groq     → GROQ_API_KEY
+  # siliconflow → SILICONFLOW_API_KEY
+  api_key: ""   # 留空：自动读取环境变量（见上方说明）
+
+  # ── 阿里云 Paraformer 专用配置（provider: "aliyun" 时生效） ─────────────────
+  aliyun_oss:
+    endpoint: "oss-cn-beijing.aliyuncs.com"
+    # ⚠️  以下三项敏感信息请通过 .env 文件或环境变量传入，留空即可自动读取：
+    #   ALIYUN_OSS_ACCESS_KEY_ID / ALIYUN_OSS_ACCESS_KEY_SECRET / ALIYUN_OSS_BUCKET
+    access_key_id: ""       # 环境变量 ALIYUN_OSS_ACCESS_KEY_ID
+    access_key_secret: ""   # 环境变量 ALIYUN_OSS_ACCESS_KEY_SECRET
+    bucket_name: ""         # 环境变量 ALIYUN_OSS_BUCKET
+    prefix: "paraformer-tmp/"                  # 上传路径前缀（转写完成后自动删除）
+    # 遇 ConnectionResetError(10054) 时可调整以下参数：
+    # connect_timeout: 120    # 连接超时秒数，默认 120
+    # part_size_mb: 2         # 分片大小(MB)，默认 2，网络不稳可改为 1
+
+# ─── 本地 Whisper 转写 ────────────────────────────────────────────────────────
+whisper:
+  model: "medium"   # 备用默认值（硬件检测失败时）；实际会根据 GPU 显存自动推荐
+  language: "zh"
+  initial_prompt: >
+    这是一段Java编程教学视频。涉及的技术术语包括：
+    JVM、JDK、JRE、HashMap、ArrayList、synchronized、volatile、
+    泛型、反射、Lambda、Stream、Spring、Spring Boot、MyBatis 等。
+  beam_size: 5
+  device: "auto"   # auto（优先 torch，不存在时用 ctranslate2+nvidia-smi 自动检测 GPU）/ cpu / cuda
+
+# ─── 关键帧提取 ───────────────────────────────────────────────────────────────
+keyframes:
+  # 场景切换检测灵敏度（0~1，越小越灵敏）
+  # Java 教程以 PPT/IDE 切换为主，0.25 能更好捕捉幻灯片翻页
+  scene_threshold: 0.25
+  # 兜底间隔采样（秒），30s 可在 ~10min 视频内提供约 20 帧基础覆盖
+  fallback_interval: 30
+  # 每视频最大帧数上限，教程内容密集可适当调高
+  max_frames_per_video: 80
+  jpg_quality: 2
+
+  # ── words.json 词级时间戳引导关键帧（转写产物 *_words.json 存在时自动启用）──
+  # words_gap: 词间停顿触发阈值（秒）
+  #   讲课类视频推荐 0.6-0.8s；代码演示类视频可调高到 1.0-1.5s
+  words_gap: 0.6
+  # words_proximity: words 引导帧与已有帧的最小距离（秒），过近则跳过避免重复
+  words_proximity: 10.0
+
+# ─── 长视频分段 ───────────────────────────────────────────────────────────────
+long_video:
+  max_segment_duration: 5400
+  target_segment_duration: 2700

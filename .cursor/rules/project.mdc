@@ -1,0 +1,87 @@
+---
+description: Java 学习工作流 - 项目级指令，在 Cursor 中处理 Java 教程视频时自动应用
+alwaysApply: true
+---
+
+# Java 学习工作流 - 项目指令
+
+> 本规则在 Cursor 中自动应用。完整指令见 `CLAUDE.md`，Skill 见 `skills/java-learning/SKILL.md`。
+
+## 首次启动检查
+
+当用户首次在本项目中与你对话时，**必须按以下顺序执行自动初始化**：
+
+### 1. 环境检查
+
+检查以下条件是否满足：
+- `.venv/` 虚拟环境是否存在
+- `.mcp.json`、`.cursor/mcp.json` 或 `.vscode/mcp.json` 配置是否存在（三者之一即可）
+- `portable-gpu-worker/videos/` 目录是否存在
+
+如果任一条件不满足，运行：
+```bash
+python scripts/bootstrap.py
+```
+
+### 2. 依赖验证
+
+如果 `.venv/` 已存在，快速验证核心依赖：
+```bash
+# Windows
+.venv\Scripts\python -c "import mcp, faster_whisper, genanki, yaml, rich; print('OK')"
+# macOS/Linux
+.venv/bin/python -c "import mcp, faster_whisper, genanki, yaml, rich; print('OK')"
+```
+如果失败，重新安装：
+```bash
+# Windows
+.venv\Scripts\pip install -r mcp-server/requirements.txt
+# macOS/Linux
+.venv/bin/pip install -r mcp-server/requirements.txt
+```
+
+### 3. 启动 GUI 选择界面
+
+以后台模式运行 GUI 启动器，命令立即返回，GUI 窗口在后台独立运行：
+```bash
+# Windows（isBackground=true，命令立即返回）
+.venv\Scripts\python scripts/gui_launcher.py --env cursor
+# macOS/Linux
+.venv/bin/python scripts/gui_launcher.py --env cursor
+```
+> 命令返回后，立即向用户说：「✅ GUI 已弹出，请在界面中选择章节并点击确认按钮。**选择完成后，发送任意消息继续。**」
+> 收到用户的下一条消息后，读取 `scripts/_gui_result.json`，按 `action` 字段执行后续流程（详见 `CLAUDE.md` 首次启动检查 Step 4）。
+> 若文件不存在，提示用户先在 GUI 中点击确认再发消息。
+
+## 核心工作流
+
+### 单视频处理
+
+用户要求处理视频时（参考 `.claude/commands/process-video.md`）：
+
+1. 检查视频对应的 `portable-gpu-worker/output/{课程}/{章节}/{视频名}/_preprocessing/` 目录下是否有预处理产物
+2. 如无，先在 portable-gpu-worker 中用 `0_开始使用.bat` 运行预处理
+3. 视频时长 > 90 分钟时，预处理自动分段
+4. 调用 MCP 工具查询知识图谱 → 加载 A1_subtitle_analysis.md (字幕分析 + 模式判断) → A2_knowledge_gen.md (知识文档生成)
+5. 视频级唯一产物 `knowledge_{stem}.md` 输出到 `portable-gpu-worker/output/{课程}/{章节}/{视频名}/`
+   章节级产物（CHAPTER_SYNTHESIS、CHAPTER_EXERCISES、CHAPTER_ANKI）在流程 C 中生成
+
+### 批量处理
+
+通过 GUI 启动器选择章节和 Session → 逐个执行流程 A（每视频完整 6 步，每步不可跳过）→ Session 全部完成后执行流程 C（章节综合 → CHAPTER_SYNTHESIS / CHAPTER_EXERCISES / CHAPTER_ANKI）。
+
+> 详细规范见 `CLAUDE.md` 和 `SKILL.md`。
+
+## MCP 工具
+
+本项目提供 15 个 MCP 工具，在 Cursor 中需确保 `.cursor/mcp.json` 已配置（运行 `bootstrap.py` 自动生成）。配置后需**完全重启 Cursor** 才能加载。
+
+## Python 运行约定
+
+本项目所有 Python 脚本应通过项目内虚拟环境运行：
+```bash
+# Windows
+.venv\Scripts\python scripts/pipeline.py <command>
+# macOS/Linux
+.venv/bin/python scripts/pipeline.py <command>
+```

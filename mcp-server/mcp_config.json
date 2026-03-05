@@ -1,0 +1,23 @@
+{
+  "_comment": "此文件为 MCP 配置参考模板。实际配置由 bootstrap.py 自动生成",
+  "_auto_config_note": "运行 python scripts/bootstrap.py 后会自动生成 .mcp.json (Claude) 和 .cursor/mcp.json (Cursor)",
+
+  "mcpServers": {
+    "java-learning-workflow": {
+      "command": "python",
+      "args": [
+        "/ABSOLUTE/PATH/TO/java-learning-workflow/mcp-server/server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/ABSOLUTE/PATH/TO/java-learning-workflow"
+      }
+    }
+  },
+
+  "_usage_note": [
+    "1. 推荐方式：运行 python scripts/bootstrap.py 自动配置",
+    "2. 手动配置：将 /ABSOLUTE/PATH/TO/ 替换为实际路径",
+    "3. 确保已运行: pip install -r mcp-server/requirements.txt",
+    "4. Claude Code: 重启使 .mcp.json 生效；Cursor: 完全重启使 .cursor/mcp.json 生效"
+  ]
+}

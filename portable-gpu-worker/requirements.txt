@@ -1,0 +1,11 @@
+virtualenv>=20.0.0
+faster-whisper>=1.2.0
+openai>=1.0.0
+ctranslate2>=4.0.0,<=4.4.0
+pyyaml>=6.0
+rich>=13.0.0
+# 可选：在线 API 扩展提供商（按需安装，不安装不影响本地转写）
+# assemblyai>=3.0.0     # AssemblyAI 转写：pip install assemblyai
+# deepgram-sdk>=3.0.0   # Deepgram 转写：pip install deepgram-sdk
+# dashscope>=1.20.0     # 阿里云 Paraformer 转写：pip install dashscope
+# oss2>=2.18.0          # 阿里云 OSS（Paraformer 需要，本地文件上传用）：pip install oss2

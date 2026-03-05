@@ -1,0 +1,177 @@
+# Java 学习工作流 - 全局配置
+# 修改此文件来调整工作流行为
+# bootstrap.py 首次运行时会根据环境自动更新部分配置
+
+# ── Whisper 字幕转写配置 ──────────────────────────────────────────────────────
+whisper:
+  # 模型大小：tiny < base < small < medium < large-v3
+  # 推荐：初次使用用 medium，追求准确率用 large-v3
+  model: "medium"
+  
+  language: "zh"
+  
+  # 初始提示词：预置技术词汇，显著提升代码术语识别率
+  # 覆盖 Java 基础、Java Web、Spring Boot 全系列课程词汇
+  initial_prompt: >
+    这是一段Java编程教学视频，包含大量技术术语。
+    常见技术词汇：JVM、JDK、JRE、JLS、JVMS、
+    HashMap、LinkedHashMap、TreeMap、HashSet、LinkedHashSet、TreeSet、
+    ArrayList、LinkedList、ArrayDeque、PriorityQueue、
+    synchronized、volatile、ThreadLocal、ReentrantLock、ReadWriteLock、
+    ConcurrentHashMap、CountDownLatch、CyclicBarrier、Semaphore、
+    泛型、通配符、类型擦除、反射、注解、动态代理、
+    Lambda、Stream、Optional、Function、Predicate、Consumer、Supplier、
+    CompletableFuture、ForkJoinPool、
+    接口、抽象类、多态、继承、封装、内部类、
+    设计模式、单例、工厂、装饰器、观察者、策略、
+    Young GC、Full GC、G1、ZGC、Shenandoah、
+    堆、栈、方法区、元空间、直接内存、
+    try-catch-finally、throws、checked异常、unchecked异常、
+    Java 8、Java 11、Java 17、Java 21、LTS、
+    Servlet、JSP、JDBC、Filter、Listener、Session、Cookie、
+    HTTP请求、GET、POST、PUT、DELETE、RESTful、JSON、
+    Tomcat、Jetty、Nginx、
+    Spring、Spring Boot、Spring MVC、Spring Cloud、
+    IoC、DI、依赖注入、控制反转、AOP、面向切面、
+    Bean、ApplicationContext、BeanFactory、
+    @Component、@Service、@Repository、@Controller、@RestController、
+    @Autowired、@Resource、@Qualifier、@Value、@Configuration、@Bean、
+    @RequestMapping、@GetMapping、@PostMapping、@PathVariable、@RequestBody、
+    @ResponseBody、@RequestParam、
+    Spring Security、OAuth2、JWT、Token、
+    MyBatis、MyBatis-Plus、Mapper、SqlSession、
+    事务、@Transactional、ACID、隔离级别、
+    Redis、缓存、分布式锁、
+    RabbitMQ、Kafka、消息队列、
+    Nacos、Eureka、服务注册、服务发现、
+    Feign、Gateway、网关、负载均衡、
+    Docker、Kubernetes、微服务、
+    Maven、Gradle、pom.xml、build.gradle、
+    单元测试、JUnit、Mockito、@Test、@SpringBootTest
+  
+  beam_size: 5       # 越大越准确，越慢。5是较好的平衡点
+  device: "cpu"     # auto / cpu / cuda（bootstrap.py 会自动检测并修改）
+
+# ── 关键帧提取配置 ────────────────────────────────────────────────────────────
+keyframes:
+  # 场景切换检测阈值 (0.0-1.0)，使用 PySceneDetect AdaptiveDetector
+  # - 0.2：非常敏感，帧数很多（适合快速切PPT的视频）
+  # - 0.25：均衡（推荐，适合 Java 教程 PPT/IDE 切换）
+  # - 0.5：不敏感，只提取剧烈变化（适合实操演示为主的视频）
+  scene_threshold: 0.25
+
+  # 兜底间隔采样（秒），防止长时间无场景切换的段落
+  # 30s 可在约 10min 视频内提供约 20 帧基础覆盖
+  fallback_interval: 30
+
+  # 每视频最多关键帧数上限（超出时均匀抽样）
+  max_frames_per_video: 80
+
+  # JPG 质量（1=最高质量，31=最低）
+  jpg_quality: 2
+
+  # ── words.json 词级时间戳引导关键帧（转写产物 *_words.json 存在时自动启用）──
+  # words_gap: 词间停顿触发阈值（秒）
+  #   讲课类视频推荐 0.6-0.8s；代码演示类视频可调高到 1.0-1.5s
+  words_gap: 0.6
+  # words_proximity: words 引导帧与已有帧的最小距离（秒），过近则跳过
+  words_proximity: 10.0
+
+# ── 长视频处理配置 ────────────────────────────────────────────────────────────
+long_video:
+  # 超过此时长(秒)自动分段。默认 5400 = 90分钟
+  max_segment_duration: 5400
+  # 分段目标时长(秒)。默认 2700 = 45分钟
+  target_segment_duration: 2700
+  # 段间重叠(秒)，避免语句被切断
+  overlap_seconds: 30
+
+# ── 信息源优先级（不建议修改）────────────────────────────────────────────────
+source_priority:
+  P1:
+    - "JLS 21（Java 语言规范）"
+    - "JVMS 21（JVM 规范）"
+    - "JDK 21 官方 Javadoc"
+    - "Spring Framework 官方文档"
+    - "Spring Boot 官方参考文档"
+  P2:
+    - "JEP 文档"
+    - "OpenJDK 官方博客"
+    - "Spring 官方博客"
+    - "Servlet 规范（Jakarta EE）"
+  P3:
+    - "Effective Java 第3版（Bloch）"
+    - "深入理解 Java 虚拟机 第3版（周志明）"
+    - "Java 并发编程实战（Goetz）"
+    - "Java 核心技术 第12版（Horstmann）"
+    - "Java 性能权威指南（Oaks）"
+    - "Spring 实战 第6版（Walls）"
+    - "Spring Boot 编程思想（小马哥）"
+  P4:
+    - "美团技术团队博客（需注明年份）"
+    - "阿里技术博客（需注明年份）"
+    - "Stack Overflow 高赞答案（近3年）"
+    - "Baeldung（需注明年份）"
+  P5_BANNED:
+    - "CSDN 匿名帖子"
+    - "无日期博客转载"
+    - "未注明来源的技术文章"
+
+# ── 输出配置 ──────────────────────────────────────────────────────────────────
+output:
+  base_dir: "./portable-gpu-worker/output"
+  
+  # 以下配置仅供 AI 提示词参考，不被 Python 脚本直接读取
+  # 是否将关键帧嵌入到知识文档
+  include_keyframes_in_doc: true
+  
+  # 关键帧在文档中的相对路径前缀
+  # - 单视频：frames_path_prefix + "/scene_NNNNNN.jpg" 或 "/interval_NNNNNN.jpg"
+  # - 长视频分段：frames_path_prefix + "/{segment_stem}/scene_NNNNNN.jpg"（如 _preprocessing/frames/03-集合框架_part01/scene_000001.jpg）
+  frames_path_prefix: "_preprocessing/frames"
+  
+  # Anki 牌组配置
+  anki:
+    deck_name: "Java 全栈学习"
+    # 标签前缀（所有卡片都会加上此前缀）
+    tag_prefix: "java"
+    # 是否将关键帧图片打包进 .apkg（供 AI 参考的配置项）
+    include_images: true
+
+# ── 学习者水平配置 ────────────────────────────────────────────────────────────
+# 影响知识点讲解深度和示例复杂度
+# beginner: 零基础友好, 详细解释每个概念, 类比多, 代码注释密
+# intermediate: 有一定基础, 适度精简
+# advanced: 高级, 侧重底层原理与性能优化
+learner_level: "beginner"
+
+# ── 课程范围配置 ──────────────────────────────────────────────────────────────
+course_scope:
+  - "Java 基础语法"
+  - "Java 面向对象"
+  - "Java 集合框架"
+  - "Java 异常与 IO"
+  - "Java 多线程与并发"
+  - "JVM 原理"
+  - "JDBC 数据库编程"
+  - "Java Web (Servlet/JSP)"
+  - "Maven/Gradle 构建工具"
+  - "Spring Framework"
+  - "Spring Boot"
+  - "Spring MVC"
+  - "MyBatis / MyBatis-Plus"
+  - "Spring Security"
+  - "Spring Cloud 微服务"
+  - "Redis 与缓存"
+  - "消息队列 (RabbitMQ/Kafka)"
+
+# ── Java 版本配置 ─────────────────────────────────────────────────────────────
+java:
+  primary_version: 21       # 主线讲述版本
+  compare_versions: [8, 11, 17, 21]  # 版本差异对比的范围
+
+# ── 路径配置（bootstrap.py 会自动更新为绝对路径）───────────────────────────────
+paths:
+  project_root: "D:/APP/Code/Claude/java-learning-workflow"
+  videos_dir: "D:/APP/Code/Claude/java-learning-workflow/portable-gpu-worker/videos"
+  output_dir: "D:/APP/Code/Claude/java-learning-workflow/portable-gpu-worker/output"
