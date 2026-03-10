@@ -1,0 +1,16 @@
+{
+  "servers": {
+    "java-learning-workflow": {
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": [
+        "${workspaceFolder}\\mcp-server\\server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      },
+      "type": "stdio"
+    }
+  }
+}

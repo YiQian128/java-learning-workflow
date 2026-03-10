@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "java-learning-workflow": {
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": [
+        ".\\mcp-server\\server.py"
+      ],
+      "env": {
+        "PYTHONPATH": ".",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "recommendations": [
+    // ── AI 助手（必装）───────────────────────────────────────────────────────
+    // VS Code 1.99+ 已内置 MCP 支持，无需额外 MCP 插件，只需安装以下两项：
+    "GitHub.copilot",           // Copilot 核心
+    "GitHub.copilot-chat",      // Copilot Chat（含 Agent 模式 + MCP 调用能力）
+
+    // ── Python ──────────────────────────────────────────────────────────────
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.isort",
+    "kevinrose.vsc-python-indent",
+    "njpwerner.autodocstring",
+
+    // ── Java ────────────────────────────────────────────────────────────────
+    "redhat.java",
+    "vscjava.vscode-java-pack",
+
+    // ── 其他工具 ────────────────────────────────────────────────────────────
+    "vstirbu.vscode-mermaid-preview",
+    "formulahendry.code-runner",
+
+    // ── Anki 预览 ───────────────────────────────────────────────────────────
+    "feilong.ankiview",
+    "codecolajs.ankisidebar"
+  ]
+}

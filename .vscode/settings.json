@@ -1,0 +1,25 @@
+{
+  "files.autoGuessEncoding": true,
+  // Python 解释器：项目内虚拟环境路径（跨机器通用）
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+  // Java JDK 根目录：从系统环境变量 JAVA_HOME 读取
+  "java.home": "${env:JAVA_HOME}",
+  // C/C++ 编译器路径：从系统环境变量 CC 读取（如 msys2 gcc 或 clang）
+  "C_Cpp.default.compilerPath": "${env:CC}",
+
+  // ── 终端 UTF-8 支持 ───────────────────────────────────────────────────────
+  // PowerShell 启动时自动切换到 UTF-8 代码页，解决中文乱码
+  "terminal.integrated.profiles.windows": {
+    "PowerShell (UTF-8)": {
+      "source": "PowerShell",
+      "args": ["-NoExit", "-Command", "chcp 65001 | Out-Null; $OutputEncoding = [System.Text.Encoding]::UTF8"],
+      "icon": "terminal-powershell"
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "PowerShell (UTF-8)",
+  // Python 进程输出也强制 UTF-8
+  "terminal.integrated.env.windows": {
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONUTF8": "1"
+  }
+}

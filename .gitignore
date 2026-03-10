@@ -11,10 +11,7 @@ dist/
 build/
 
 # 用户配置（含本地路径，由 bootstrap.py 自动生成）
-.mcp.json
 .cursor/mcp.json
-.vscode/mcp.json
-.claude/
 
 # 视频 / 预处理产物 / 输出（由 portable-gpu-worker/.gitignore 负责，此处冗余保底）
 portable-gpu-worker/videos/**
@@ -36,9 +33,18 @@ portable-gpu-worker.zip
 
 # IDE / 编辑器
 .idea/
-.vscode/
 *.swp
 *.swo
+
+# 跟踪工作流必需配置（其余本地文件继续忽略）
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/mcp.json
+
+.claude/*
+!.claude/commands/
+!.claude/commands/*.md
 
 # 系统文件
 .DS_Store
