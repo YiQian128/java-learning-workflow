@@ -10,6 +10,15 @@ import re
 import sys
 from pathlib import Path
 
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _portable_path(path: Path, root: Path = WORKER_ROOT) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return str(path)
+
 
 def _safe_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', '_', name).strip('. ')
@@ -149,7 +158,7 @@ def transcribe(
 
     with open(words_path, "w", encoding="utf-8") as f:
         json.dump({
-            "video": str(video),
+            "video": _portable_path(video),
             "language": info.language,
             "duration": info.duration,
             "segments": segments

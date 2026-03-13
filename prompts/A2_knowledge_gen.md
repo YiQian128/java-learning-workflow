@@ -4,6 +4,7 @@
 > 上一步：`A1_subtitle_analysis.md` 产物（`{safe_stem}_topics.json` + `{safe_stem}_teaching_style.json`）
 > 本步产物：`knowledge_*.md`（视频级唯一产物；练习题/Anki 在流程C章节综合阶段从零生成）
 > 下一步：流程A Step 6 — `update_knowledge_graph`（本文末"强制后处理步骤"中执行，不可省略）
+> 📎 **注**：视频级文档生成所有内容（包括 EXCLUDE 类话题的背景故事等）。内容价值过滤（Stage 0 三桶分类：SKILL/MENTAL_MODEL/EXCLUDE）在流程 C 章节综合阶段执行，不在此步骤。
 
 ## ❌ 强制前置禁令
 
@@ -42,6 +43,8 @@ TEACHING_STYLE_JSON:     {safe_stem}_teaching_style.json 的内容（Stage 1 Ste
 PROCESSING_MODE:         来自 topics.json 的 video_info.processing_mode 字段
                          取值：Full | Supplement | DeepDive | Practice
 REFERENCE_MAP:           来自 topics.json 的 video_info.reference_map 字段（已覆盖概念的文档引用位置）
+                         ← 用途：Full 模式下，对 reference_map 中 depth≥2 的概念只写一句引用不重新展开；
+                           Supplement/DeepDive 模式下，用于定位已有文档位置以建立交叉引用
 COURSE_CONTEXT:          {课程根目录名}/{day文件夹名}
                          ← 例如 "Java基础-视频上/day01-Java入门"
 FRAMES_MAPPING:          {frames_index.json 的原始内容}
@@ -61,7 +64,7 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 ---
 
 > 📌 **信息源优先级**遵循 SKILL.md §原则5（P1 真相层 → P5 禁用层）；无 P1-P3 锚点的内容一律标注 ⚠️【不确定】。
-> 引用格式：正文中以 `> 来源：{P1/P2/P3 锚点}` 注明。
+> 引用格式：正文中不内联来源标注，所有权威来源统一收录到文档末尾「📚 权威参考来源」表格中（见 `templates/knowledge_doc.md` 末尾格式）。
 
 ---
 
@@ -116,11 +119,22 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 - **`intermediate`**：完整讲解 + 陷阱 + 与其他概念对比
 - **`advanced`**：完整讲解 + 底层原理 + 版本差异（仅当学习阶段匹配时）
 
+**优先级 3（其他规则之后的最终校验）：内容是否真属于本 day 的主讲范围**
+
+> 即使 `relevance=direct` + `pace=slow`，也需判断该话题在本 day 是"主讲对象"还是"背景出现"：
+
+| 场景 | 字数上限 |
+|------|---------|
+| 老师快速提及（`pace=fast`），仅作背景补充 | **≤ 150 字**（一句定义 + 一句意义） |
+| 属于后续章节的核心主题，本 day 只是"打招呼" | **≤ 200 字**，末尾注明"将在 {X章节} 深入学习" |
+| 本 day 的核心操作目标（直接可运行/可决策） | 按 pace/difficulty 正常展开，无字数上限 |
+
 **严禁行为**：
 - ❌ 在讲"变量定义"时展开介绍 JVM 栈帧内存布局
 - ❌ 在讲"数组基础"时介绍泛型协变/逆变
 - ❌ 对老师快速带过的知识点（`pace: fast`）写超过2段的说明
 - ❌ 对 `relevance ≠ "direct"` 的 segment 套用 pace/difficulty 规则展开（relevance 已定性，pace 规则不再生效）
+- ❌ 把"背景性出现"当"核心知识"展开：顺手一提的背景信息、与当前操作无直接关系的历史/原理类内容一律 ≤ 150 字
 
 ---
 
@@ -128,7 +142,7 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 
 **在生成任何产物之前，先读取 `PROCESSING_MODE` 确定行为模式。**
 
-> 📎 模式已由 A1 Stage 1 Step 4c 决定并写入 `topics.json`，此处直接按对应模式执行行为，无需重新判断触发条件。触发条件定义见 SKILL.md §Stage 1 内部决策表。
+> 📎 模式已由 A1 Stage 1 Step 4c 决定并写入 `topics.json`，此处直接按对应模式执行行为，无需重新判断触发条件。触发条件定义见 SKILL.md §流程A → Stage 1 内部决策。
 
 ---
 
@@ -156,7 +170,11 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 
 {新内容正文 — 与已有文档不重叠}
 
-> 来源：{P1-P3 锚点}
+## 📚 权威参考来源
+
+| 知识点 | 权威来源 |
+|--------|----------|
+| {知识点名} | {P1-P3 锚点} |
 ```
 
 **固定规则**：
@@ -239,7 +257,7 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 - `beginner` + `pace: slow` 或 `intermediate` → **标准**：切入段→概念段→前置回顾（可选）→图示/表格→代码→陷阱（可选）
 - `is_difficulty_peak: true` 或 `advanced` → **深度**：背景切入→完整概念→图示→代码演示→底层原理（当阶段合适时）→陷阱（必须有反例）→版本差异（有时）
 
-每节末尾均附：`> 来源：{P1/P2/P3 锚点}`
+文档末尾统一附「📚 权威参考来源」表格，按知识点列出其权威来源（见 `templates/knowledge_doc.md`），正文中不内联 `> 来源：`
 
 ---
 

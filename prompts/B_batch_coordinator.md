@@ -149,9 +149,9 @@ Spring Boot → 消息队列（RabbitMQ/Kafka）
 
   · Layer 2 产物：CHAPTER_SYNTHESIS（完整独立章节学习手册）
                   CHAPTER_EXERCISES / CHAPTER_ANKI / 知识完整性审计
-  · 执行流程 C 需要加载 prompts/C_chapter_synthesis.md，且必须分多轮对话完成：
-     Pass 1（可选）→ Outline  ｜  Pass 2a → SYNTHESIS  ｜  Pass 2b → EXERCISES  ｜  Pass 2c → ANKI
-     每轮独立响应，保存后等用户确认，严禁合并为一次生成
+  · 执行流程 C 需要先完成前置步骤（C1 工具调用 + C1.5 开发者深度门控），再加载 prompts/C_chapter_synthesis.md 分多轮生成：
+     C1（前置工具调用）→ C1.5（深度门控）→ Pass 1（可选）→ Outline  ｜  Pass 2a → SYNTHESIS  ｜  Pass 2b → EXERCISES  ｜  Pass 2c → ANKI
+     每件产物保存后 AI 自行评估剩余容量，充足则直接继续，不足则等待下一轮对话
 
   [Y] 立即生成   [N] 跳过，继续下一章节   [M] 稍后手动触发
 ```

@@ -97,12 +97,12 @@ P1（真相层）  JLS / JVMS / JDK 官方 Javadoc / Spring 官方文档
 P2（权威层）  JEP 文档 / OpenJDK 官方博客 / Spring 官方博客
 P3（经典层）  Effective Java / 深入理解JVM / Java并发编程实战 / Spring 实战
 P4（参考层）  美团/阿里技术博客 / 高赞 SO / Baeldung（近3年）
-P5（禁用）    不得直接引用
+P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版本过旧博文 — 不得直接引用
 ```
 
 ### 6. 教学风格提取与运用
 
-**在生成知识文档前，必须先从 SRT 字幕和词级时间戳（`_words.json`）中提取教学风格，保存为 `{video_stem}_teaching_style.json`，并在写作中运用。**
+**在生成知识文档前，必须先从 SRT 字幕和词级时间戳（`_words.json`）中提取教学风格，保存为 `{safe_stem}_teaching_style.json`（`safe_stem` = 视频文件名中特殊字符替换为 `_` 后的结果），并在写作中运用。**
 
 #### 提取维度
 

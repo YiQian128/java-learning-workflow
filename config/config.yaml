@@ -170,8 +170,8 @@ java:
   primary_version: 21       # 主线讲述版本
   compare_versions: [8, 11, 17, 21]  # 版本差异对比的范围
 
-# ── 路径配置（bootstrap.py 会自动更新为绝对路径）───────────────────────────────
+# ── 路径配置（相对项目根目录，保持可移植）──────────────────────────────────
 paths:
-  project_root: "D:/APP/Code/Claude/java-learning-workflow"
-  videos_dir: "D:/APP/Code/Claude/java-learning-workflow/portable-gpu-worker/videos"
-  output_dir: "D:/APP/Code/Claude/java-learning-workflow/portable-gpu-worker/output"
+  project_root: "."
+  videos_dir: "./portable-gpu-worker/videos"
+  output_dir: "./portable-gpu-worker/output"

@@ -14,7 +14,7 @@
 
 ## 变量约定（复用参数）
 
-- `WORKSPACE_ROOT`：项目根目录（示例：`D:/APP/Code/Claude/java-learning-workflow`）
+- `WORKSPACE_ROOT`：项目根目录（示例：`<project-root>`）
 - `COURSE`：课程目录名（示例：`Java基础-视频上`）
 - `DAY`：章节目录名（示例：`day01-Java入门`）
 - `CHAPTER_KEY`：章节相对路径，格式：`{COURSE}/{DAY}`
@@ -89,14 +89,14 @@ python scripts/bootstrap.py
 
 产物输出结构：
 ```
-portable-gpu-worker/output/{课程}/{章节}/{video_stem}/
-└── knowledge_{stem}.md   ← 唯一视频级产物
+portable-gpu-worker/output/{课程}/{章节}/{safe_stem}/
+└── knowledge_{safe_stem}.md   ← 唯一视频级产物
     _preprocessing/
 ```
 
 ### Step 5：章节处理完成 → 询问是否执行流程 C
 
-所有视频的 `knowledge_{stem}.md` 生成完成后，提示用户是否执行章节综合（流程 C）：
+所有视频的 `knowledge_{safe_stem}.md` 生成完成后，提示用户是否执行章节综合（流程 C）：
 
 ```
 所有 {n} 个视频已处理完成。是否立即执行流程 C（章节综合）生成章节学习包？
@@ -104,8 +104,18 @@ portable-gpu-worker/output/{课程}/{章节}/{video_stem}/
   n — 跳过，稍后手动执行
 ```
 
-若用户确认，加载 `prompts/C_chapter_synthesis.md`，汇总各视频摘要，生成：
+若用户确认，按以下步骤执行流程 C（**每个 Pass 独立响应，严禁合并为一次**）：
 
+1. **前置 MCP 工具调用**：
+   - `read_chapter_summaries(chapter_dir)` → 获取所有视频摘要与知识图谱数据
+   - `scan_chapter_completeness(chapter_dir)` → 生成待补全清单
+2. **加载 `prompts/C_chapter_synthesis.md`，按 Pass 分轮生成**：
+   - `PASS_MODE = "outline"` → 保存 `chapter_outline.json`（可选，中/大型章节建议执行）
+   - `PASS_MODE = "synthesis"` → 使用**占位符追加链**逐组写入，生成并保存 `CHAPTER_SYNTHESIS_{章节名}.md`
+   - `PASS_MODE = "exercises"` → 读取磁盘 synthesis 文件，生成并保存 `CHAPTER_EXERCISES_{章节名}.md`
+   - `PASS_MODE = "anki"` → 读取磁盘 synthesis 文件，生成 CSV + 调用 `export_anki_package` 打包
+
+最终产物保存在：
 ```
 portable-gpu-worker/output/{课程}/{章节}/CHAPTER_SYNTHESIS_{章节名}/
 ├── CHAPTER_SYNTHESIS_{章节名}.md    ← 主学习文档（连贯全章，独立可读）★

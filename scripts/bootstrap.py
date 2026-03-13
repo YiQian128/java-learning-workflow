@@ -250,6 +250,13 @@ def setup_mcp() -> bool:
     if not venv_python:
         venv_python = Path(sys.executable)
 
+    if _IS_WIN:
+        rel_python = r".\.venv\Scripts\python.exe"
+        rel_server = r".\mcp-server\server.py"
+    else:
+        rel_python = "./.venv/bin/python"
+        rel_server = "./mcp-server/server.py"
+
     mcp_server_config = {
         "command": str(venv_python),
         "args": [
@@ -264,7 +271,15 @@ def setup_mcp() -> bool:
 
     mcp_config = {
         "mcpServers": {
-            "java-learning-workflow": mcp_server_config
+            "java-learning-workflow": {
+                "command": rel_python,
+                "args": [rel_server],
+                "env": {
+                    "PYTHONPATH": ".",
+                    "PYTHONIOENCODING": "utf-8",
+                    "PYTHONUTF8": "1"
+                }
+            }
         }
     }
 
@@ -278,7 +293,17 @@ def setup_mcp() -> bool:
     print(f"  {green('✓')} Cursor MCP 配置已写入: {CURSOR_MCP_CONFIG}")
 
     # VS Code Copilot Agent (1.99+) 项目级 MCP 配置
-    vscode_server_config = dict(mcp_server_config)
+    vscode_server_config = {
+        "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe" if _IS_WIN else "${workspaceFolder}/.venv/bin/python",
+        "args": [
+            "${workspaceFolder}\\mcp-server\\server.py" if _IS_WIN else "${workspaceFolder}/mcp-server/server.py"
+        ],
+        "env": {
+            "PYTHONPATH": "${workspaceFolder}",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1"
+        }
+    }
     vscode_server_config["type"] = "stdio"
     vscode_mcp_config = {
         "servers": {
@@ -381,15 +406,14 @@ def adapt_config(gpu: str) -> bool:
             )
             changes.append("Whisper 模型降级为 medium (CPU 模式)")
 
-        # 路径适配——追加 paths 段（若不存在则添加）
-        # 使用正斜杠路径避免 Windows 反斜杠在 re.sub 中的转义问题
-        safe_root = str(PROJECT_ROOT).replace("\\", "/")
-        safe_videos = str(VIDEOS_DIR).replace("\\", "/")
-        safe_output = str(OUTPUT_DIR).replace("\\", "/")
+        # 路径适配——统一写入可移植的相对路径，避免把本机绝对路径固化到仓库
+        safe_root = "."
+        safe_videos = "./portable-gpu-worker/videos"
+        safe_output = "./portable-gpu-worker/output"
 
         if "paths:" not in config_text:
             paths_block = (
-                f"\n# ── 路径配置（自动生成）────────────────────────────────────────\n"
+                f"\n# ── 路径配置（自动生成，相对项目根目录）────────────────────────\n"
                 f"paths:\n"
                 f'  project_root: "{safe_root}"\n'
                 f'  videos_dir: "{safe_videos}"\n'

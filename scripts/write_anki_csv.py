@@ -9,8 +9,9 @@ write_anki_csv.py --- 将 Anki 卡片数据写入 UTF-8 无 BOM 的 CSV 文件
     然后调用 write_anki_csv.write_csv(OUTPUT, CARDS) 写入，无需 CLI 参数。
 
     示例模板（_write_csv_demo.py）：
+        from pathlib import Path
         import sys
-        sys.path.insert(0, r"d:\APP\Code\Claude\java-learning-workflow\scripts")
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
         from write_anki_csv import write_csv
 
         OUTPUT = r"path\to\anki_demo.csv"
