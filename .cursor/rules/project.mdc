@@ -59,11 +59,11 @@ python scripts/bootstrap.py
 
 用户要求处理视频时（参考 `.claude/commands/process-video.md`）：
 
-1. 检查视频对应的 `portable-gpu-worker/output/{课程}/{章节}/{视频名}/_preprocessing/` 目录下是否有预处理产物
+1. 检查视频对应的 `portable-gpu-worker/output/{课程}/{章节}/{safe_stem}/_preprocessing/` 目录下是否有预处理产物（`safe_stem` = 文件名特殊字符替换为 `_`）
 2. 如无，先在 portable-gpu-worker 中用 `0_开始使用.bat` 运行预处理
 3. 视频时长 > 90 分钟时，预处理自动分段
 4. 调用 MCP 工具查询知识图谱 → 加载 A1_subtitle_analysis.md (字幕分析 + 模式判断) → A2_knowledge_gen.md (知识文档生成)
-5. 视频级唯一产物 `knowledge_{stem}.md` 输出到 `portable-gpu-worker/output/{课程}/{章节}/{视频名}/`
+5. 视频级唯一产物 `knowledge_{safe_stem}.md` 输出到 `portable-gpu-worker/output/{课程}/{章节}/{safe_stem}/`
    章节级产物（CHAPTER_SYNTHESIS、CHAPTER_EXERCISES、CHAPTER_ANKI）在流程 C 中生成
 
 ### 批量处理

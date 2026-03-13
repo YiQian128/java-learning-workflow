@@ -13,6 +13,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _portable_path(path: str | Path, root: Path = WORKER_ROOT) -> str:
+    candidate = Path(path)
+    try:
+        return candidate.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return str(candidate)
+
 DEFAULT_MAX_DURATION = 5400
 DEFAULT_TARGET_DURATION = 2700
 OVERLAP_SECONDS = 30
@@ -126,7 +136,7 @@ def analyze_and_split(video_path: str, output_dir: str,
     video_name = Path(video_path).name
 
     result = {
-        "video": video_path,
+        "video": _portable_path(video_path),
         "video_name": video_name,
         "total_duration": duration,
         "duration_formatted": _fmt(duration),
@@ -135,7 +145,7 @@ def analyze_and_split(video_path: str, output_dir: str,
 
     if not result["needs_splitting"]:
         result["segments"] = [{
-            "index": 1, "path": video_path, "filename": video_name,
+            "index": 1, "path": _portable_path(video_path), "filename": video_name,
             "start_time": 0, "end_time": duration, "duration": duration,
             "is_first": True, "is_last": True
         }]

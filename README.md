@@ -195,7 +195,7 @@ java-learning-workflow/
 
 ```bash
 # 1. 克隆项目
-cd D:\APP\Code\Claude\java-learning-workflow
+cd <project-root>
 
 # 2. 运行自动配置（检测环境 + 创建虚拟环境 + 安装依赖 + 配置 MCP）
 python scripts/bootstrap.py

@@ -37,6 +37,15 @@ import time
 import urllib.request
 from pathlib import Path
 
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _portable_path(path: Path, root: Path = WORKER_ROOT) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return str(path)
+
 # ─── 常量 ────────────────────────────────────────────────────────────────────
 
 API_FILE_LIMIT = 24 * 1024 * 1024   # 24 MB（OpenAI/Groq 上限约 25 MB，留余量）
@@ -210,7 +219,7 @@ def _write_outputs(
 
     with open(words_path, "w", encoding="utf-8") as f:
         json.dump({
-            "video": str(video),
+            "video": _portable_path(video),
             "language": detected_lang,
             "duration": duration,
             "segments": segments,

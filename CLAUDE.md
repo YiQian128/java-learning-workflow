@@ -107,12 +107,14 @@ GUI 关闭后输出 JSON（例）：
   "course": "Java基础-视频上",
   "day": "day01-Java入门",
   "day_path": "...",
+   "day_path_portable": "portable-gpu-worker/videos/Java基础-视频上/day01-Java入门",
   "chapter_output_dir": "...portable-gpu-worker/output/Java基础-视频上/day01-Java入门",
+   "chapter_output_dir_portable": "portable-gpu-worker/output/Java基础-视频上/day01-Java入门",
   "total": 16,
   "completed": 1,
   "preprocessed": 15,
   "pending": 0,
-  "model": "cop-claude-sonnet-4.6",
+   "model": "cop-claude-opus-4.6",
   "token_budget": 70000,
   "total_sessions": 3,
   "current_session_index": 0,
@@ -123,12 +125,14 @@ GUI 关闭后输出 JSON（例）：
 }
 ```
 
+> 说明：`day_path` / `chapter_output_dir` 仍保留绝对路径，便于工具直接调用；但凡需要把路径写回 `chapter_outline.json`、知识图谱、阶段摘要等**持久化产物**时，优先使用对应的 `*_portable` 字段，或先转换为相对于项目根目录的路径。
+
 **读取这个 JSON 结果，按其中的 `action` 字段执行后续流程：**
 
 | `action` 字段 | 操作 |
 |------------|------|
-| `process_chapter` | **只处理 `current_session_videos` 列表中的视频**（不多不少），每个完整执行流程 A 全部 6 步；若 `current_session_index + 1 < total_sessions` → 提示用户**重新运行 GUI 启动器**；若是最后一 Session → **按下方流程 C 步骤执行章节综合（多轮）** |
-| `synthesis` | 直接执行流程 C：以 JSON 中 `chapter_output_dir` 字段作为 CHAPTER_DIR，调用 `read_chapter_summaries(chapter_output_dir)` + `scan_chapter_completeness(chapter_output_dir)`，再按 SKILL.md Steps C2-C4 多轮生成学习包（outline→synthesis→exercises→anki，每轮独立响应保存后等用户确认，严禁合并为一次响应） |
+| `process_chapter` | **只处理 `current_session_videos` 列表中的视频**（不多不少），每个完整执行流程 A 全部 6 步；若 `current_session_index + 1 < total_sessions` → 提示用户**重新运行 GUI 启动器**；若是最后一 Session → **按下方流程 C 步骤执行章节综合** |
+| `synthesis` | 直接执行流程 C：以 JSON 中 `chapter_output_dir` 字段作为 CHAPTER_DIR（`model`/`token_budget` 字段供 Pass 分组参考），调用 `read_chapter_summaries(chapter_output_dir)` + `scan_chapter_completeness(chapter_output_dir)` + **Step C1.5 预合成图谱扫描**，再按下方**流程 C 执行步骤**生成学习包（轻量章节：synthesis→exercises→anki；标准/大型章节：outline→synthesis→exercises→anki；每件产物保存后 AI 自行评估剩余容量决定是否继续） |
 | `manual` | 读取 `SKILL.md` 并按字面出现的询问引导用户 |
 | `cancelled` | 用户取消，不执行任何操作 |
 
@@ -136,7 +140,7 @@ GUI 关闭后输出 JSON（例）：
 
 **Session 处理完成后**：
 1. 若 `current_session_index + 1 < total_sessions` → 告知用户"Session {current_session_index+1}/{total_sessions} 已完成，请**重新运行 GUI 启动器**继续下一 Session"（GUI 启动时自动扫描最新进度，无需手动维护状态）
-2. 若是最后一个 Session → **直接触发流程 C**（见下方"流程 C"节，分轮执行）
+2. 若是最后一个 Session → **直接触发流程 C**（见下方"流程 C"节）
 
 > ⚠️ **不需要再调用 `list_video_files`** 获取标题中的视频数量，当 GUI 已将 `total`/`completed`/`preprocessed`/`pending` 包含在 JSON 输出中。
 
@@ -165,25 +169,29 @@ GUI 关闭后输出 JSON（例）：
 ### 流程 C：章节综合（生成最终学习包）
 
 **触发时机**（任意满足即可）：
-- 用户明确要求（如"帮我整合 day01"）
-- 检测到该章节所有视频均已完成流程 A
-- 开始处理新章节的第一个视频时，询问"上一章节是否要先生成学习包？"
+- 用户明确要求（如“帮我整合 day01”），或 GUI 中选择「⚑ 生成学习包」
+- 最后一个 Session 处理完成后（按 GUI JSON 中 `is_resume=false` 且 `current_session_index+1 = total_sessions`）
+- 批量处理（流程 B）完成一个章节时，系统自动询问是否执行流程 C
 
-> ❌ **严禁在一次响应内同时生成多件产物**（超时根因）。三件产物必须拆分为独立响应轮次，每轮保存后等用户确认才继续。`PASS_MODE = "full"` 已废弃。
+> **防溢出机制**：
+> - **产物级（规则 A·弹性）**：三件产物按 Pass 2a→2b→2c 顺序逐件生成保存；每件保存后 AI 自行评估剩余容量——充足则直接继续，不足则等待下一轮对话。
+> - **节级（规则 B·强制）**：outline / synthesis / exercises 三个 pass 内部均必须使用**占位符追加链（Placeholder-Chain）**分步写入——outline pass：O1（骨架）→ O2 至 ON（逐组填写 KP）→ ON+1（synthesis_plan）；synthesis pass：先 `create_file` 写头部，再逐组 `replace_string_in_file` 追加 KP 节；exercises pass：末尾分 EN+1（面试题）+ EN+2（索引）两步；每次写盘前生成量控制在单次响应安全范围内（参考 3-5 个 KP），见 `prompts/C_chapter_synthesis.md` §占位符追加链规范。
 
 **执行步骤（完整规范见 SKILL.md §流程C → Steps C1-C4）**：
 
 1. **Step C1（工具调用，强制前置）**：
    - `read_chapter_summaries(chapter_dir)` → 获取所有视频摘要与知识图谱数据
-   - `scan_chapter_completeness(chapter_dir)` → 生成 `chapter_completeness_audit.md`（兜底机制2）
+   - `scan_chapter_completeness(chapter_dir)` → 生成 `chapter_completeness_audit.md`（兜底机制 2）
 
-2. **Step C2（策略选择）**：根据知识点总数选择 Pass 数（总轮数含 C1 前置步骤）：≤15点→3轮Pass+C1=共4轮；16-40点→4轮Pass+C1=共5轮；>40点→(N+4)轮Pass+C1=共N+5轮
+2. **Step C1.5（开发者深度门控，强制，C1 之后 C2 之前）**：遍历本章所有概念，按概念类别和课程阶段计算 `developer_min_depth`，对比图谱 `current_depth` 生成 `depth_verdict`（adequate/escalate/supplement/defer）。结果传入 Outline Pass / 轻量章节 S0，驱动 `synthesis_depth` 和 `depth_gate_result` 决策。详见 SKILL.md §流程C Step C1.5。
 
-3. **Step C3（多轮生成）**：加载 `prompts/C_chapter_synthesis.md`，按以下 Pass 顺序各占一轮对话依次执行：
-   - `PASS_MODE = "outline"`（可选，标准/大型章节）→ 保存 `chapter_outline.json`
-   - `PASS_MODE = "synthesis"` → 生成并保存 `CHAPTER_SYNTHESIS_*.md`（知识点>20时分节写入）
-   - `PASS_MODE = "exercises"` → 读取磁盘 synthesis 文件，生成并保存 `CHAPTER_EXERCISES_*.md`
-   - `PASS_MODE = "anki"` → 读取磁盘 synthesis 文件，生成 CSV + 调用 `export_anki_package` 打包
+3. **Step C2（策略选择）**：根据知识点总数选择 Pass 数（参考值：≤15知识点→3轮Pass；16-40知识点→4轮Pass；>40知识点→N+4轮Pass；均为参考值，实际以返回数据量为准）
+
+4. **Step C3（多轮生成）**：加载 `prompts/C_chapter_synthesis.md`，按以下 Pass 顺序依次执行（每件产物保存后 AI 自行评估是否继续，见规则 A）：
+   - `PASS_MODE = "outline"`（可选，标准/大型章节）→ 占位符追加链内部分步写入（O1（骨架）→ O2 至 ON（逐组填写 KP）→ ON+1（synthesis_plan），禁止一次性生成完整 JSON），保存 `chapter_outline.json`（含 `synthesis_plan.groups` 分组规划）
+   - `PASS_MODE = "synthesis"` → 读取磁盘 `chapter_outline.json`（标准/大型章节；**轻量章节跳过 outline pass 时，须在 synthesis pass 内先执行 Stage 0 内容价值分类门 + Step C1.5 深度门控**，再按 S0 步骤自动估算分组），使用**占位符追加链**逐组写入生成并保存 `CHAPTER_SYNTHESIS_*.md`（每次写盘前生成量在安全范围内，永不溢出）
+   - `PASS_MODE = "exercises"` → 使用占位符追加链逐组写入（`<!-- EXERCISES_PENDING -->`）；读取磁盘 `chapter_outline.json` 获取 `code_anchors` 为主出题锚点；轻量章节（< 8000字）可补充读 SYNTHESIS 全文，标准/大型章节仅依赖 `code_anchors`，不读大文件
+   - `PASS_MODE = "anki"` → 读取磁盘 `chapter_outline.json` 的 `code_anchors` + `depth`/`priority` 决定卡片类型和数量；生成 CSV + 调用 `export_anki_package` 打包
 
 **最终产物**（均保存在 `{chapter_dir}/CHAPTER_SYNTHESIS_{chapter_dir_name}/` 下，其中 `chapter_dir_name = Path(chapter_dir).name`，如 `day01-Java入门`）：
 - `CHAPTER_SYNTHESIS_{chapter_dir_name}.md` — **主学习文档** ★（连贯全章，概念间有显式贯通，独立可读）
@@ -228,7 +236,7 @@ portable-gpu-worker/output/
 | `prompts/A1_subtitle_analysis.md` | 字幕分析 + 图谱比对 + **模式判断** | 流程A Step 3 |
 | `prompts/A2_knowledge_gen.md` | 按模式生成知识文档（唯一输出：`knowledge_*.md`） | 流程A Step 4 |
 | `prompts/B_batch_coordinator.md` | 多视频批量调度 | 流程B |
-| `prompts/C_chapter_synthesis.md` | 章节综合 → 完整独立章节学习包（**每个 Pass 独立调用一次**：outline/synthesis/exercises/anki） | 流程C Step C3 |
+| `prompts/C_chapter_synthesis.md` | 章节综合 → 完整独立章节学习包（按 Pass 顺序调用：outline/synthesis/exercises/anki） | 流程C Step C3 |
 | `prompts/0_standalone_system_role.md` | AI 角色设定（非 Skill 环境使用）| 独立 API 对话时作为 System Prompt |
 
 ---

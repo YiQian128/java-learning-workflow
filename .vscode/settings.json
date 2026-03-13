@@ -1,11 +1,17 @@
 {
   "files.autoGuessEncoding": true,
-  // Python 解释器：项目内虚拟环境路径（跨机器通用）
+  // Python 解释器：跟随工作区虚拟环境
   "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-  // Java JDK 根目录：从系统环境变量 JAVA_HOME 读取
-  "java.home": "${env:JAVA_HOME}",
-  // C/C++ 编译器路径：从系统环境变量 CC 读取（如 msys2 gcc 或 clang）
-  "C_Cpp.default.compilerPath": "${env:CC}",
+  // Java/JDK、FFmpeg、MinGW 由环境变量提供，避免写死本机路径
+  "java.jdt.ls.java.home": "${env:JAVA_HOME}",
+  "java.configuration.runtimes": [
+    { "name": "JavaSE-21", "path": "${env:JAVA_HOME}", "default": true }
+  ],
+  // C/C++ 编译器路径
+  "C_Cpp.default.compilerPath": "${env:MINGW_HOME}\\bin\\gcc.exe",
+
+  // 不弹出"安装推荐扩展"通知（已在 extensions.json 中声明，按需手动安装）
+  "extensions.ignoreRecommendations": true,
 
   // ── 终端 UTF-8 支持 ───────────────────────────────────────────────────────
   // PowerShell 启动时自动切换到 UTF-8 代码页，解决中文乱码
@@ -17,9 +23,10 @@
     }
   },
   "terminal.integrated.defaultProfile.windows": "PowerShell (UTF-8)",
-  // Python 进程输出也强制 UTF-8
+  // Python 进程输出强制 UTF-8，并注入工具链路径
   "terminal.integrated.env.windows": {
     "PYTHONIOENCODING": "utf-8",
-    "PYTHONUTF8": "1"
+    "PYTHONUTF8": "1",
+    "PATH": "${env:FFMPEG_HOME}\\bin;${env:JAVA_HOME}\\bin;${env:PYTHON_HOME};${env:PYTHON_HOME}\\Scripts;${env:MINGW_HOME}\\bin;${env:PATH}"
   }
 }

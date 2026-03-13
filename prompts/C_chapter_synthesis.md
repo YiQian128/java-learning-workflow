@@ -3,7 +3,7 @@
 > 📌 **工作流位置**（对应 SKILL.md §工作流程 → 流程C Steps C1-C4）
 > 上一步：流程A 全部完成（章节所有视频均已完成 A1→A2→Step 6）
 > 本步产物：`CHAPTER_SYNTHESIS_*.md` / `CHAPTER_EXERCISES_*.md` / `CHAPTER_ANKI_*.csv/.apkg`
-> 兜底机制 2（知识完整性核查）和兜底机制 3（深度完整性预报）在本文件中落地（定义见 SKILL.md）
+> 兜底机制 2（知识完整性核查，即 scan_chapter_completeness）在本文件中落地（定义见 SKILL.md）
 
 ## 任务说明
 
@@ -46,7 +46,7 @@ PASS_MODE:          "outline" | "synthesis" | "exercises" | "anki"
                     synthesis  = Pass 2a：仅生成 CHAPTER_SYNTHESIS_*.md（保存后返回，禁止继续生成其他产物）
                     exercises  = Pass 2b：仅生成 CHAPTER_EXERCISES_*.md（要求 synthesis 已保存到磁盘）
                     anki       = Pass 2c：仅生成 CHAPTER_ANKI_*.csv + .apkg（要求 synthesis 已保存到磁盘）
-                    ← "full" 已废弃：三件产物必须拆分为独立响应，防止单次输出超 12000 字导致超时
+                    ← "full" 已废弃；防超时规则见上方规则 A / 规则 B
 CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outline 生成的大纲 JSON；
                     轻量章节跳过 outline pass 时此字段为 null
 ```
@@ -55,58 +55,73 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ## 处理策略选择
 
-> 🔴 **核心防超时规则（所有策略均适用）**：三件产物（CHAPTER_SYNTHESIS / CHAPTER_EXERCISES / CHAPTER_ANKI）
-> **必须分成三个独立响应轮次生成**，对应 Pass 2a / 2b / 2c，每轮保存文件后才启动下一轮。
-> 严禁在一次响应内同时生成超过一件产物——即使是轻量章节亦然。
+> � **产物级生成策略（规则 A）**：三件产物（CHAPTER_SYNTHESIS / CHAPTER_EXERCISES / CHAPTER_ANKI）必须**按序生成并逐件保存到磁盘**，前一件完整写入后才可开始下一件。
+> **AI 自主判断是否在同一轮对话中继续**：每件产物保存完成后，评估当前轮次剩余输出容量——
+> - 剩余容量充足且下一件产物预估生成量在安全范围内 → **直接继续生成下一件产物**，无需等待用户确认
+> - 剩余容量不足或接近上限 → **停止并告知用户**发送消息以继续下一件
+>
+> 占位符追加链（规则 B）始终强制执行——即使在同一轮对话中生成多件产物，每件内部仍必须分步写入。
+
+> 🔴 **核心防超时规则 B（节级，强制执行）：每次调用 `create_file` 或 `replace_string_in_file` 前，当前响应内生成的文字量必须在模型单次响应的安全上限内**（不同模型上限各异；分组时以每组 **3-5 个知识点**为基准，depth=3 的知识点取低限 1-2 个，不确定时宁小勿大）。  
+> 实现方式：**outline pass / synthesis pass / exercises pass 内部均须使用占位符追加链（Placeholder-Chain）**分步写入——outline pass：O1（骨架）→ O2 至 ON（逐组填写 KP）→ ON+1（synthesis_plan）；synthesis pass：S1（写头部）→ S2 至 SN（逐组 KP 节）→ SN+1（收尾）；exercises pass：E1（写头部）→ E2 至 EN（逐组题）→ EN+1（面试题）→ EN+2（索引）（各 Pass 详细规范见下方相应章节）。  
+> ⚠️ 违反此规则的症状：AI 在一次响应中生成完整的长文档后才调用 create_file → 文档超出模型单次输出 token 上限导致截断/超时。
 
 **判断维度：章节知识体量**（依据知识点密度，而非视频数量——同样 6 个视频，内容量可能相差 3 倍）
 
 从 `read_chapter_summaries` 数据中估算体量：将各视频的 depth≥1 知识点数量汇总为 `total_knowledge_points`，并合计各视频 `word_count_target` 得到预估产物字数。
 
+> ⚠️ **输入超限预防**：若 `read_chapter_summaries` 返回的数据量明显偏大（章节视频多、内容密集），应主动升级处理路径（轻量→标准、标准→大型），以减少后续每轮的输入量——Outline Pass 会将原始摘要压缩为结构化 JSON，Group Summary Pass 则按组分批处理，两者都能有效缓解输入超限风险。
+
 ---
 
-### 轻量章节（知识点 ≤ 15 个 / 预估产物 ≤ 8000 字）— 三轮 Pass
+### 轻量章节（知识点 ≤ 15 个 / 预估产物 ≤ 8000 字，参考值）— 三轮 Pass
 
 > 💡 **本提示词内的三轮 Pass**，不含 C1 前置工具调用（`read_chapter_summaries` + `scan_chapter_completeness`，在 SKILL.md Step C1 中已完成）。
 
-- 对话 1：PASS_MODE = "synthesis"（跳过 Outline Pass，在 synthesis pass 内执行 Stage 0 分类门）→ 保存 CHAPTER_SYNTHESIS
-- 对话 2：PASS_MODE = "exercises" → 保存 CHAPTER_EXERCISES
-- 对话 3：PASS_MODE = "anki" → 保存 CSV + 打包 apkg
+- Pass 1：PASS_MODE = "synthesis"（跳过 Outline Pass，在 synthesis pass 内执行 Stage 0 分类闸）→ 使用占位符追加链写入，保存 CHAPTER_SYNTHESIS
+- Pass 2：PASS_MODE = "exercises" → 保存 CHAPTER_EXERCISES
+- Pass 3：PASS_MODE = "anki" → 保存 CSV + 打包 apkg
 
-> 轻量章节的 synthesis pass 预估输出 ≤ 5000 字，单轮可完成；知识点超 20 个时使用分节写入（见 Pass 2a 说明）。
+> 每件产物保存完成后，AI 自行评估剩余容量，充足则直接继续下一件，不足则等待用户确认（规则 A）。
+
+> 轻量章节即使预估 ≤ 8000 字，synthesis pass 也**必须**使用占位符追加链（见 Pass 2a），保证每次写盘前生成量在单次响应安全范围内（参考 3-5 个知识点）。
 
 ---
 
-### 标准章节（知识点 16-40 个 / 预估产物 8000-20000 字）— 四轮 Pass
+### 标准章节（知识点 16-40 个 / 预估产物 8000-20000 字，参考值）— 四轮 Pass
 
 > 💡 **本提示词内的四轮 Pass**，不含 C1 前置工具调用（已在 SKILL.md Step C1 完成）。
 
-- 对话 1：PASS_MODE = "outline" → 生成并保存 chapter_outline.json（Token ~8-12k）
-- 对话 2：PASS_MODE = "synthesis" → 生成并保存 CHAPTER_SYNTHESIS（超 20 个知识点时分节写入，见 Pass 2a）
-- 对话 3：PASS_MODE = "exercises" → 生成并保存 CHAPTER_EXERCISES
-- 对话 4：PASS_MODE = "anki" → 生成 CSV + 打包 apkg
+- Pass 1：PASS_MODE = "outline" → 生成并保存 chapter_outline.json（含 `synthesis_plan.groups` 字段，见 Pass 1 详细规范）
+- Pass 2：PASS_MODE = "synthesis" → 读取 `synthesis_plan.groups`，使用占位符追加链分组写入，保存 CHAPTER_SYNTHESIS
+- Pass 3：PASS_MODE = "exercises" → 保存 CHAPTER_EXERCISES
+- Pass 4：PASS_MODE = "anki" → 生成 CSV + 打包 apkg
+
+> 每件产物保存完成后，AI 自行评估剩余容量，充足则直接继续下一件，不足则等待用户确认（规则 A）。
 
 ---
 
-### 大型章节（知识点 > 40 个 / 预估产物 > 20000 字）— N+4 轮 Pass（含 C1 共 N+5 轮）
+### 大型章节（知识点 > 40 个 / 预估产物 > 20000 字，参考值）— N+4 轮 Pass（含 C1 共 N+5 轮）
 
-**对话 1-N（Group Summaries）**：
-- 按内容关联度分组（每组预估约 5000 字），同一话题族的视频尽量归入同组
+**Pass 1-N（Group Summaries）**：
+- 按内容关联度分组（每组 3-6 个视频，控制每轮读入的知识文档总量在模型安全输入范围内），同一话题族的视频尽量归入同组
 - 不按视频数量机械分组；内容密度低的视频可多个合并为一组
-- 每次处理一组，生成 group_summary_N.json
-- Token 消耗：每次 ~8k tokens
+- 每次处理一组，生成 group_summary_N.json  
+  保存路径：`{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/group_summary_{N}.json`
 
-**对话 N+1（Outline Pass）**：
+**Pass N+1（Outline Pass）**：
 - 合并所有 group_summary，生成 chapter_outline.json
 
-**对话 N+2（Synthesis Pass 2a）**：
-- PASS_MODE = "synthesis"，使用分节写入机制（见 Pass 2a 说明）
+**Pass N+2（Synthesis）**：
+- PASS_MODE = "synthesis"，使用占位符追加链逐组写入
 
-**对话 N+3（Exercises Pass 2b）**：
+**Pass N+3（Exercises）**：
 - PASS_MODE = "exercises"
 
-**对话 N+4（Anki Pass 2c）**：
+**Pass N+4（Anki）**：
 - PASS_MODE = "anki"
+
+> 每件产物保存完成后，AI 自行评估剩余容量，充足则直接继续下一件，不足则等待用户确认（规则 A）。
 
 ---
 
@@ -114,7 +129,9 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ### 步骤
 
-**【强制前置】Stage 0 — 内容价值分类门（在 C0 之前执行，结果写入各知识点 `content_type` 字段）**
+**【强制前置】Stage 0 — 内容价值分类闸（与步骤 1 同步进行，在 C0 之前完成分类，结果写入各知识点 `content_type` 字段）**
+
+> 💡 **执行时序说明**：Stage 0 与**步骤 1**（读取 CHAPTER\_SUMMARIES）并行执行——读到每条摘要时立即分类；全部摘要读取并分类完成后，再执行步骤 0（C0 蓝图设计）。C0 依赖 Stage 0 + 步骤 1 的输出，不可在读取摘要之前执行。
 
 在读取任何视频摘要后，立即将全章所有内容按**内容性质**分入三个桶，并按下表规则决定其在 CHAPTER_SYNTHESIS 中的处置：
 
@@ -138,7 +155,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 ---
 
-0. **（C0）章节蓝图设计**（优先执行，输出写入 `central_metaphor` / `blueprint` 顶层字段）：
+0. **（C0）章节蓝图设计**（在 Stage 0 + 步骤 1 完成后执行，输出写入 `central_metaphor` / `blueprint` 顶层字段）：
    - 确定本章 `central_metaphor`（全章核心比喻/类比，将贯穿所有知识点的连接语句）
    - 梳理 3-5 个可验证学习目标（"学完能做到…"格式）
    - 初步评估各概念优先级：⭐ 核心（初学必须掌握）/ 📦 扩展（深入理解时读）/ 🔍 参考（遇到时查阅）
@@ -154,118 +171,245 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
    - 标注知识点之间的依赖关系，**并记录"为什么 A 必须在 B 之前学"（`depends_on.reason`）**
    - 提炼 `learning_chain`：只含 ⭐ 核心概念的最短依赖路径（速通时的阅读主线）
    - 结合 C0 的初步评估，确定每个知识点的最终 `priority`
-4. **规划连接语句**（`central_metaphor` 一致性约束）：
-   - 为每个相邻知识点对，规划一句"承接语"（如"有了上面对 X 的认识，Y 就好理解了"）
+4. **规划承接语句**（`central_metaphor` 一致性约束）：
+   - 为每个知识点规划一句 `from_previous` 承接语（如“有了上面对 X 的认识，Y 就好理解了”）
    - **所有 connectors 必须引用 C0 确定的 `central_metaphor`**，保持全章叙事主线一致
+   - **不规划“预告下一节”类型的连接语**——每个知识点以技术内容自然结束，不分散读者专注力
    - 标注需要"对比分析"的知识点组合
 5. **关键帧分配**：
    - 扫描各视频的 `_preprocessing/frames/` 目录
    - 为章节综合文档中的难点知识点分配最合适的关键帧（来自任意视频）
 
-### 输出：chapter_outline.json
+### 输出：chapter_outline.json（占位符追加链写入，严禁一次性生成）
 
+> 🔴 **Outline Pass 与 Synthesis Pass 面临同等超时风险**：chapter_outline.json 的 `knowledge_points` 数组通常包含 15-40 个 KP，每个 KP 含 code_anchors / connectors / synthesis_depth 等多字段，总输出量可达 5000-12000 tokens——**禁止一次性生成完整 JSON 后再调用 `create_file`**，必须使用以下占位符追加链分步写入。
+
+#### 🔴 Outline Pass 占位符追加链写入规范
+
+**步骤 O1：写骨架 JSON**（`create_file`，本步仅写顶层元数据 + blueprint + 两个占位符，不生成任何 KP 对象，生成量极小）
+
+保存路径：`{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`
+
+> `chapter_outline.json` 属于可持久化产物，`chapter_dir` 字段**禁止写绝对路径**。若工具输入或 GUI JSON 提供的是绝对路径，必须先转换为相对于项目根目录的可移植路径，例如 `portable-gpu-worker/output/Java基础-视频上/day01-Java入门`。
+
+骨架模板（步骤 O1 的完整文件内容）：
 ```json
 {
-  "chapter_name": "Day01 · Java 入门",
-  "chapter_dir": "{CHAPTER_DIR}",
-  "total_word_count_target": 6000,
+  "chapter_name": "{章节名}",
+   "chapter_dir": "portable-gpu-worker/output/{课程文件夹}/{chapter_dir_name}",
+  "total_word_count_target": 0,
   "independence_requirement": "读者仅凭本文档，无需任何视频级文档，应能完成 CHAPTER_EXERCISES 的全部题目",
-  "central_metaphor": "建造并开工第一条 Java 流水线——JDK 是整套工具箱，JRE 是厂房，JVM 是流水线，HelloWorld 是第一次试生产",
-  "learning_chain": ["java.hci_intro", "java.wora", "java.jdk_jre_jvm", "java.hello_world"],
+  "central_metaphor": "{C0 确定的全章核心比喻}",
+  "learning_chain": ["{KP_id_1}", "{KP_id_2}", "...仅含 core 的最短依赖路径..."],
   "blueprint": {
-    "learning_goals": [
-      "能用一句话解释 Java 跨平台是怎么实现的",
-      "能区分 JDK / JRE / JVM 并说出各自用途",
-      "能独立写出并运行 HelloWorld 程序",
-      "能在命令行中切换目录、运行 javac/java 命令"
-    ],
-    "speedrun_30min": ["java.wora", "java.jdk_jre_jvm", "java.hello_world"],
+    "learning_goals": ["能…", "能…", "能…"],
+    "speedrun_30min": ["{core KP id 列表}"],
     "full_path_2hr": "按目录顺序全量阅读",
-    "prerequisites": "无，本章是课程起点",
-    "next_chapter_dependency": "学完本章后可进入 day02（变量与数据类型）"
+    "prerequisites": "{前置要求}",
+    "next_chapter_dependency": "{下一章依赖说明}"
+  },
+  "chapter_narrative_arc": "{本章叙事主线一句话}",
+  "chapter_intro": {
+    "opening_sentence": "{1-2 句纯技术导语}"
   },
   "knowledge_points": [
-    {
-      "id": "java.hci_intro",
-      "display_name": "人机交互与程序的概念",
-      "priority": "extend",
-      "source_videos": ["02-人机交互-图形化界面的小故事"],
-      "depth": 1,
-      "narrative_position": 1,
-      "summary": "程序是人与机器沟通的桥梁，操作系统是中间人",
-      "key_frame": null,
-      "depth_treatment": "完整展开",
-      "word_count_target": 400,
-      "content_type": "mental_model",
-      "synthesis_treatment": "full",
-      "max_words": null,
-      "depends_on": [],
-      "connectors": {
-        "from_previous": null,
-        "to_next": "有了对'程序是什么'的认识，我们来看 Java 程序特别在哪里——它为什么可以跨平台运行"
-      }
-    },
-    {
-      "id": "java.wora",
-      "display_name": "WORA 与字节码跨平台原理",
-      "priority": "core",
-      "source_videos": ["01-Java学习介绍", "08-HelloWorld小程序"],
-      "depth": 2,
-      "narrative_position": 5,
-      "summary": "javac 编译 → .class 字节码 → JVM 执行，一次编写到处运行",
-      "key_frame": "08-HelloWorld小程序/_preprocessing/frames/scene_000003.jpg",
-      "depends_on": [
-        { "id": "java.hci_intro", "reason": "需要先理解'什么是程序'，才能理解 Java 为何要多一个字节码层" }
-      ],
-      "depth_treatment": "完整展开",
-      "word_count_target": 800,
-      "content_type": "mental_model",
-      "synthesis_treatment": "full",
-      "max_words": null,
-      "connectors": {
-        "from_previous": "有了上面对 JVM 是什么的认识，现在来看为什么它能做到跨平台——这正是我们这条流水线的核心设计",
-        "to_next": "理解了字节码，我们就能看懂为什么安装 JDK 和只安装 JRE 是不同的事"
-      }
-    }
+    "<!-- KP_PENDING -->"
   ],
-  "implicit_knowledge_to_mention": [
-    {
-      "concept": "public/static/void/class 关键字",
-      "seen_in": "08-HelloWorld小程序",
-      "note": "用户在 HelloWorld 代码中见过，正式讲解在 OOP 章节"
-    }
-  ],
-  "chapter_narrative_arc": "从安装 Java 开发环境出发，通过编写和运行第一个 HelloWorld 程序，理解完整的从源码到运行的认知链路，掌握 JDK/JRE/JVM 三者组成与关系。",
-  "chapter_intro": {
-    "opening_sentence": "（1-2 句纯技术导语，点明本章结束后用户能做什么；禁止写学习价值、历史背景或励志内容）"
-  }
+  "implicit_knowledge_to_mention": [],
+  "synthesis_plan": "<!-- SYNPLAN_PENDING -->"
 }
 ```
 
-> 🔴 **强制保存（Pass 1 必须）**：JSON 生成后，立即调用 `create_file` 将上述 JSON 保存到：
-> `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`
-> 保存成功后告知用户 "✅ Pass 1 完成，请发送任意消息继续 Pass 2a（综合知识文档）"，**等待用户确认后才继续**。
+> ❗ `"<!-- KP_PENDING -->"` 和 `"<!-- SYNPLAN_PENDING -->"` 是 JSON 内的字符串占位符，后续 replace 操作依赖它们，**必须原样写入**。O1 完成后 JSON 文件暂时不是合法格式——这是预期状态。
+
+---
+
+**步骤 O2 ~ ON：逐组填充 KP 对象**（每组 `replace_string_in_file`，每组 **3-5 个 KP**，生成量控制在单次响应安全范围内）
+
+每个 KP 对象包含以下全部字段（参考下方 KP 字段说明）：`id` / `display_name` / `priority` / `source_videos` / `depth` / `narrative_position` / `summary` / `key_frame` / `depends_on` / `depth_treatment` / `word_count_target` / `content_type` / `synthesis_treatment` / `synthesis_depth` / `deferred_credibility` / `deferred_aspects` / `max_words` / `connectors` / `code_anchors`
+
+对第 G 组（G = 1 … N-1）：
+- `old_string` = `"<!-- KP_PENDING -->"`
+- `new_string` = `{KP_(G组第1个) JSON 对象},\n    {KP_(G组第2个) JSON 对象},\n    ...\n    "<!-- KP_PENDING -->"`
+
+对最后一组（G = N）：
+- `old_string` = `"<!-- KP_PENDING -->"`
+- `new_string` = `{KP_(N组第1个) JSON 对象},\n    ...\n    {KP_(N组最后1个) JSON 对象}` **（无尾随占位符，数组自然闭合）**
+
+> ⚠️ O2 至 ON 过程中文件内含有字符串占位符，暂不是合法 JSON——这是预期行为，ON+1 完成才恢复合法性。
+
+**KP 对象字段填写规则（O2 至 ON 写入每个 KP 对象时填写，与 ON+1 步骤无关）**：
+
+> **`code_anchors` 字段**（Pass 2b/2c 精准出题锚点，每个非 exclude 的 KP 必须填写）：在阅读 `CHAPTER_SUMMARIES` 过程中，为每个 KP 提炼 3-5 个"出题精华片段"。**格式**：每条 ≤ 25 字，包含具体命令/报错信息/语法/数字。`code_anchors` 为空或只有泛泛描述时，exercises pass 无法出精准题。
+>
+> **`synthesis_depth` / `deferred_credibility` / `deferred_aspects` 字段**：
+>    - `priority=core AND depth < 2 AND 本章需独立编写/执行` → `synthesis_depth = 2`（**强制地板**）
+>    - `priority=core AND depth < 2 AND 属于模板背记或一次性决策` → `synthesis_depth = 1`
+>    - `priority=core AND depth ≥ 2` → `synthesis_depth = depth`
+>    - `priority=extend` → `synthesis_depth = min(depth, 1)`（受 **≤400字** 上限约束）
+>    - `priority=reference` → `synthesis_depth = min(depth, 1)`（受 **≤150字** 上限约束）
+>    - `deferred_credibility`：`next_expected_in` 含具体章节名 → `"confirmed"`；模糊或缺失 → `"speculative"/"none"`
+>    - `deferred_aspects`：仅 `deferred_credibility="confirmed"` 时填写，仅列高阶内容面（depth≥3）
+>
+> **`depth_gate_result` 字段**（开发者深度门控 + 图谱交叉参照，每个 KP 必须填写）：
+>    - **前置依赖**：SKILL.md Step C1.5 的预合成图谱扫描结果（`chapter_depth_scan`），含每个概念的 `depth_verdict` 和 `developer_min_depth`
+>    - 对每个 `priority=core` 的 KP：
+>      1. 查找 `chapter_depth_scan` 中该概念的 `depth_verdict`
+>      2. `depth_verdict = "escalate"` → `synthesis_depth` 设为 `developer_min_depth`，`depth_gate_result = "escalated"`
+>      3. `depth_verdict = "supplement"` → 确保新侧面完整展开，`depth_gate_result = "escalated"`
+>      4. `depth_verdict = "adequate"` → `depth_gate_result = "pass"`
+>      5. `depth_verdict = "defer"` → `depth_gate_result = "deferred"`，记录到 `deferred_aspects` 并在末尾速查表中体现
+>    - **type_system 类概念额外约束**（概念类别含 type/cast/conversion/primitive）：即使 `"adequate"`，也检查 `aspects_covered` 是否含 `"pitfall"`——若缺少，补充 ≥1 个陷阱代码示例
+>    - `priority=extend/reference` → `depth_gate_result = "pass"`（不强制提升）
+
+---
+
+**步骤 ON+1：填入 synthesis_plan**（`replace_string_in_file`，JSON 至此成为合法格式）
+
+按以下规则计算 `synthesis_plan` 后：
+1. 将所有 `content_type ≠ "exclude"` 的 KP，按 `narrative_position` 排序
+2. 从第 1 个 KP 开始累加 `word_count_target`，累计值超过当次安全写盘阈值时切割出一组（当前 KP 放入下一组）；基准：每组 **3-5 个 KP**，depth=3 偏多时取低限，不确定时宁小勿大
+3. 每组写入 `groups[].kp_ids`（id 列表）、`est_words`（本组估算词数）、`note`（一句话描述本组主题）
+4. `total_estimate_words` = 所有 KP 的 `word_count_target` 之和；`group_size_limit` = 本次实际使用的分组阈值
+5. 只有一组时（章节很小）也必须写 `groups` 数组（含 1 个元素）
+
+**gap_fill_group 自动插入（ON+1 步骤中，synthesis_plan 分组完成后）**：
+>    扫描 `COMPLETENESS_AUDIT` 中所有 `priority=core` 的浅层核心概念：
+>    - 若已被常规 `groups[].kp_ids` 覆盖 → 仅在对应 KP 上设 `synthesis_depth ≥ 2`，无需新增分组
+>    - 若**未被任何常规分组覆盖** → 在 `groups` 末尾追加：
+>      ```json
+>      { "id": "gap_fill", "is_gap_fill": true, "kp_ids": ["..."], "est_words": 600,
+>        "note": "兜底补写区：视频讲浅但后续未能充分深化的核心概念，以 synthesis_depth=2 展开" }
+>      ```
+
+> ⚠️ `synthesis_plan` **不可省略**——Synthesis Pass 依赖它决定占位符追加链的循环次数；`code_anchors` **不可为空**——Pass 2b/2c 依赖它生成精准题目和 Anki 卡片。
+
+**全部步骤（O1 ~ ON+1）完成后**，告知用户“✅ Pass 1 完成”。然后 **AI 自行评估剩余输出容量**：充足则直接继续 Pass 2a，不足则告知用户“请发送任意消息继续 Pass 2a（综合知识文档）”。
 
 ---
 
 ## Pass 2a · 综合知识文档（`PASS_MODE = "synthesis"`）
 
-> 🔴 **强制输出卡点（防超时核心机制）**：本轮次**唯一任务**是生成并保存 `CHAPTER_SYNTHESIS_*.md`。  
-> 生成完成后立即调用 `create_file` 写入磁盘，**严禁在同一响应内开始生成练习题或 Anki CSV**。  
-> 保存成功后告知用户"✅ Pass 2a 完成，请发送任意消息继续 Pass 2b（练习题）"。
+> 🔴 **强制输出卡点（防超时核心机制）**：本 Pass 的任务是生成并保存 `CHAPTER_SYNTHESIS_*.md`。  
+> **必须使用占位符追加链逐组写入**（见下方“占位符追加链写入规范”），**严禁一次性生成整个文档后再调用 `create_file`**。  
+> SYNTHESIS 完整保存后，AI 自行评估剩余容量决定是否继续生成 EXERCISES（规则 A）。  
+> 所有组写入完成的标志：占位符 `<!-- SYNTHESIS_PENDING -->` 已在步骤 SN+1 中消亡（见下方 ✅ Pass 2a 完成检查点）。
 
-**前置**（若使用了 Outline Pass）：使用 `read_file` 从磁盘加载 `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`（Pass 1 产物）作为本轮的 `CHAPTER_OUTLINE` 输入；轻量章节跳过 Outline Pass 时直接忽略此步骤。
+**前置**（若使用了 Outline Pass）：使用 `read_file` 从磁盘加载 `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`（Pass 1 产物），读取 `synthesis_plan.groups` 作为分组依据。轻量章节跳过 Outline Pass 时直接忽略此步骤，按步骤 S0 自动计算分组。
 
 **输入**：`CHAPTER_OUTLINE`（若有）或直接基于 `CHAPTER_SUMMARIES`
 
 > ⚠️ **跳过 Outline Pass 时的 Stage 0 强制提示**：
 > 轻量章节直接进入 synthesis pass 时，**Stage 0 内容价值分类门仍然必须执行**——在读取 CHAPTER_SUMMARIES 后、开始写正文之前，先按 Stage 0 三桶分类规则把所有内容标记为 skill / mental_model / **exclude**。  
 > **exclude 类内容直接丢弃，不以任何形式写入文档。**  
-> Stage 0 不因跳过 Outline Pass 而豁免。
+> Stage 0 不因跳过 Outline Pass 而豁免。  
+> （Stage 0 完整规则及分类表——见本文件 §Pass 1 · Outline Pass → 【强制前置】Stage 0 章节）
+>
+> **跳过 Outline Pass 时的深度门控**：
+> 轻量章节在 S0 分组后、S1 开始写文档前，需执行 SKILL.md Step C1.5 的预合成图谱扫描，然后对每个 `priority=core` 的概念执行开发者深度门控检查（规则同 Outline Pass 的 `depth_gate_result` 字段说明）。基于 `chapter_depth_scan` 的 `depth_verdict` 决定是否提升写作深度。
 
-**超大综合文档分节写入**（当 `knowledge_points` 数量 > 20 时，**必须分两步保存**以避免单次输出超限）：
-1. 生成文档头部 + 学习蓝图 + 本章导读 + 目录 + **前 10 个知识点节** → 末尾追加占位符 `<!-- SYNTHESIS_CONTINUE -->` → 调用 `create_file` 保存
-2. 生成第 11 个起的所有知识点节 + 末尾各区块（预报表 / 练习索引）→ 调用 `replace_string_in_file` 替换占位符 `<!-- SYNTHESIS_CONTINUE -->`
+---
+
+### 🔴 占位符追加链（Placeholder-Chain）写入规范（**所有章节必须执行**）
+
+> **为什么不能一次性生成整个文档**：AI 生成文字进入响应流，`create_file` 在生成结束后才调用。  
+> 若一次生成 15,000 字（典型标准章节），超过模型单响应输出 token 上限后文件永远无法保存。  
+> 占位符追加链将每次写盘前的生成量控制在单次响应安全范围内（每组 3-5 个知识点），彻底消除溢出风险。
+
+**执行步骤（严格按序，不可跳过任何步骤）**：
+
+**步骤 S0：确定分组**
+- 若有 `chapter_outline.json`：读取 `synthesis_plan.groups`（Pass 1 已计算好），直接使用
+- 若无 outline（轻量章节）：从 `CHAPTER_SUMMARIES` 中列出所有 depth≥1 且非 exclude 概念，按认知递进顺序排列；根据各概念 depth 估算字数（depth=1 → 约 500词，depth=2 → 约 900词，depth=3 → 约 1500词），从第 1 个概念开始累加，超过当次安全阈值时切割出一组（基准：每组 3-5 个概念，不确定时宁小勿大）；即使整章仅 1 组也须走完以下流程
+
+**步骤 S1：写文档头部**（`create_file`，**本步骤仅含标题、导航、目录等骨架，生成量较小**）
+
+生成并立即以 `create_file` 保存以下内容（注意末尾占位符）：
+```
+# {CHAPTER_NAME}
+
+> **中心类比**：{central_metaphor}
+
+**学习目标：**
+{blueprint.learning_goals — 3-5 个可验证陈述，每条用"能…"格式}
+
+---
+
+## 快速导航
+
+| 学习路径 | 推荐内容 |
+|---------|---------|
+| **30 分钟速读** | {speedrun_30min 核心知识点跳转链接} |
+| **完整学习（2小时）** | 按目录顺序全量阅读 |
+| **前置要求** | {blueprint.prerequisites} |
+| **下一章依赖** | {blueprint.next_chapter_dependency} |
+
+---
+
+## 目录
+[完整目录，带跳转链接；相关知识点以"第X部分"分组]
+
+---
+
+<!-- SYNTHESIS_PENDING -->
+```
+
+> ❗ `<!-- SYNTHESIS_PENDING -->` 是追加链占位符，**必须原样写入**，后续 replace 操作依赖它。
+
+**步骤 S2 ~ SN：逐组追加 KP 节**（每组 `replace_string_in_file`，**每步生成量控制在单次响应安全范围内，基准 3-5 个 KP**）
+
+对 groups 中的第 G 组（G = 1, 2, ..., N），按以下方式执行：
+
+1. 生成第 G 组内所有 KP 的完整节文本（遵循节格式规范，见下方"产物"部分；分部标题用 `## 第X部分`，单个 KP 节用 `### {编号}.`）
+2. 调用 `replace_string_in_file`，将：
+   - `old_string` = `<!-- SYNTHESIS_PENDING -->`
+   - `new_string` = `{第 G 组的所有节文本}\n\n<!-- SYNTHESIS_PENDING -->`
+3. 保存确认后，继续第 G+1 组
+
+> 💡 每次 replace 都把占位符向后推移一组——文档不断增长，占位符始终在末尾。
+
+**步骤 SN+1：写参考来源表 + 速查表 + 收尾**（`replace_string_in_file`，**本步骤含末尾三部分：参考来源表 → 速查表 → 结束行**）
+
+调用 `replace_string_in_file` 将 `<!-- SYNTHESIS_PENDING -->` 替换为：
+```
+---
+
+## 📚 权威参考来源
+
+| 知识点 | 权威来源 |
+|--------|----------|
+{遍历本章所有知识点（按节编号顺序），每个知识点一行：
+ - "知识点"：知识点名称（与正文节标题一致）
+ - "权威来源"：该知识点依据的 P1/P2/P3 锚点（如 JLS §4.2 / JVMS §2.3.4 / Effective Java Item 6 等）
+ 注意：正文中不出现任何内联 `> 来源：` 标注，所有权威来源统一在此表列出。}
+
+---
+
+## 📋 知识点深度与后续规划速查表
+
+| 知识点 | 本章深度 | 目标深度 | 后续规划 | 说明 |
+|--------|---------|---------|---------|------|
+{遍历 outline.json 中所有 deferred_credibility ≠ null 或 depth < expected_max_depth 的 KP，逐行填写：
+ - "本章深度"：当前 synthesis_depth 对应的层级描述（如"depth=1 引介"）
+ - "目标深度"：expected_max_depth 对应的层级描述
+ - "后续规划"：✅ {confirmed_in 章节} / ❓ 本课程可能不覆盖 / ✅ {正式讲解章节}（隐性知识）
+ - "说明"：一句话描述缺口或状态
+
+ 同时遍历 implicit_concepts（depth=0.5 的隐性知识），填入表格：
+ - "本章深度"：depth=0.5 隐性（代码中出现）
+ - "后续规划"：✅ {预期讲解章节}
+ - "说明"：{首次出现的视频} 代码中已出现
+
+ 若没有需要列入速查表的条目，则不生成此表（直接写收尾行）。}
+
+---
+
+*本章学习手册完 · 共 {N} 个知识点*  
+*下一章：{blueprint.next_chapter_name} | 练习题 → [CHAPTER_EXERCISES_{chapter_dir_name}.md](./CHAPTER_EXERCISES_{chapter_dir_name}.md)*
+```
+（本步骤不添加新占位符，占位符至此消亡）
+
+**全部步骤完成后**，告知用户“✅ CHAPTER_SYNTHESIS 已保存（共写入 N 组）”。然后 **AI 自行评估剩余输出容量**：充足则直接继续 Pass 2b，不足则告知用户“请发送任意消息继续 Pass 2b（练习题）”。
 
 ---
 
@@ -276,59 +420,42 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 ```markdown
 # {CHAPTER_NAME}
 
-> 📋 **本文档是本章完整学习手册，无需查看任何视频级文档即可独立学习。**
-> 来源：综合本章 {N} 个视频的知识内容（视频级原始文档见各视频子目录）
-> 参考：[JavaGuide](https://javaguide.cn) · [JLS 21](…) · [JVMS 21](…)
+> **中心类比**：{central_metaphor}
 
-## 📋 本章学习蓝图
-
-### 🎯 学完本章，你能做到：
+**学习目标：**
 {blueprint.learning_goals — 3-5 个可验证陈述，每条用"能…"格式}
-
-### 🗺 知识关联总览
-{用文本依赖图展示 learning_chain 中各核心概念的前后依赖关系及原因（depends_on.reason），例如：}
-```
-[概念A] ──→ [概念B（依赖A：因为…）] ──→ [概念C]
-              │
-              └──→ [概念D（并行，不阻塞主线）]
-↑ 以上为核心链路（⭐），速通时按此顺序学习
-📦 [扩展概念X]：理解更深时阅读，不阻塞主链路
-🔍 [参考概念Y]：遇到时查阅即可
-```
-
-### ⭐ 30 分钟速通（只看核心概念）
-{blueprint.speedrun_30min — 只列 ⭐ 核心知识点及对应章节内跳转链接}
-
-### 📚 完整学习路径（建议 2 小时）
-{全量知识点列表，按 narrative_position 顺序，每项后注明优先级标记}
-
-### 🔗 本章与前后章节的连接
-- **前置要求**：{blueprint.prerequisites}
-- **学完后可以**：{blueprint.next_chapter_dependency}
 
 ---
 
-## 本章导读
+## 快速导航
 
-{chapter_intro.opening_sentence：1-2 句纯技术导语，说明本章教什么、学完能做什么操作。
-严格禁止内容：学习动力/价值观 · 历史故事 · 行业数据 · 讲师背景 · 任何非技术前言
-正确示例："本章从安装 JDK 出发，通过编写并运行 HelloWorld，建立从源码到字节码到 JVM 执行的完整认知链路。"
-错误示例："Java 是全球最流行的语言之一，学好 Java 将让你……"}
-
-**本章核心概念链**：{以"→"表示依赖顺序的概念链，只含 ⭐ 核心概念}
+| 学习路径 | 推荐内容 |
+|---------|---------|
+| **30 分钟速读** | {speedrun_30min 核心知识点跳转链接} |
+| **完整学习（2小时）** | 按目录顺序全量阅读 |
+| **前置要求** | {blueprint.prerequisites} |
+| **下一章依赖** | {blueprint.next_chapter_dependency} |
 
 ---
 
 ## 目录
 
-{按 narrative_position 排列的知识点列表，带内部跳转链接，每项后注明预估阅读时间}
+{按 narrative_position 排列知识点，带内部跳转链接；相关知识点按主题分组，格式："## 第X部分：主题名"}
 
 ---
 
-{各知识点的完整展开讲解，按 narrative_position 顺序}
+{各知识点完整展开，按 narrative_position 顺序，以"## 第X部分：主题名"分组}
 
-节格式：
-## {编号}. {知识点名称} {⭐|📦|🔍}
+分部格式：
+## 第X部分：{主题名}（汇集同属一个技术主题的相邻知识点）
+
+> **叙事定位**：{一句话说明此部分在全章位置及承上启下作用}
+
+---
+
+知识点节格式：
+### {编号}. {知识点名称} {⭐|📦|🔍}
+（编号为全章连续递增的序号——如第一部分含 1-5，第二部分从 6 开始，不按部分重新编号）
 （优先级标记来自 outline.json 的 `priority` 字段：core=⭐，extend=📦，reference=🔍）
 
 {connector.from_previous — 承接上一节的过渡语，让读者感受到连贯叙事；必须引用 central_metaphor}
@@ -340,30 +467,16 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 {前置知识补充块（如有依赖）：
 > 💡 回顾：{前置概念} 是指 {一句话}，在本章第 X 节中介绍过。}
 
-{隐性知识提示块（如适用）：
-> 💡 **你已经见过它了**：在本章视频 {X} 的代码演示中出现过 `{term}`。当时先跑起来了，现在来正式学习它。}
-
-{connector.to_next — 预告下一节，引发读者期待}
-
----
-
-## 📌 本章已引入但后续才完整的概念
-
-| 概念 | 当前深度 | 预期完整深度 | 何时完整讲解 |
-|------|---------|------------|------------|
-| {概念名} | {depth}/4 | {max_depth}/4 | {后续章节} |
+{注意：正文中不插入任何推迟注解（不使用"后续深入""你已经见过它了""扩展了解"等标记）。
+ 正文中不插入 `> 来源：` 内联标注——所有权威来源统一在文档末尾「📚 权威参考来源」表格中列出。
+ 隐性知识在正式讲解处自然展开，无需提示"你已经见过"。
+ 深度缺口和后续规划信息统一收录到文档末尾的「知识点深度与后续规划速查表」中。
+ 正文只写纯粹的技术内容，保持阅读流畅不中断。}
 
 ---
 
-## 📝 本章练习索引
-
-| 知识点 | 对应练习 |
-|-------|---------|
-| {知识点}（第 N 节） | Q{n} · Q{m} |
-
----
-
-*练习题 → [CHAPTER_EXERCISES_{chapter_dir_name}.md](./CHAPTER_EXERCISES_{chapter_dir_name}.md)*
+*本章学习手册完 · 共 {N} 个知识点*  
+*下一章：{blueprint.next_chapter_name} | 练习题 → [CHAPTER_EXERCISES_{chapter_dir_name}.md](./CHAPTER_EXERCISES_{chapter_dir_name}.md)*
 ```
 
 #### 写作原则（按重要性排序）
@@ -375,29 +488,71 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 - 验证方法：写完后问自己——"一个对本章完全陌生的人，仅凭本文档，能否回答所有练习题？" 能 = 合格。不能 = 找出缺失的讲解，补充完整。
 - **严禁**写"详见 knowledge_XXX.md"之类的引用来代替解释。
 
-**原则 2：深度展开，禁止摘要**
+**原则 2：深度合理，不摘要也不过度展开**
 
-每个 `depth≥1` 的核心概念**必须完整展开**，不能只写摘要。完整展开的字数参考：
+每个知识点的写作深度由 **`priority`（⭐📦🔍）× `synthesis_depth`** 共同决定：`priority` 定上限，`synthesis_depth` 定下限（gap_fill 机制）。两者冲突时 **priority 上限优先**。
+
+**① `priority` 上限（天花板，先查此表）**
+
+| 优先级 | 语义 | 字数上限 | 写法要求 |
+|--------|------|---------|----------|
+| ⭐ `core` | 初学必须掌握 | 无硬限（按 synthesis_depth 弹性展开） | 正常深度展开 |
+| 📦 `extend` | 深入理解时读 | **≤ 400 字** | 定义 + 一句类比 + 要点列表；无需代码示例，无需完整陷阱分析 |
+| 🔍 `reference` | 遇到时查阅 | **≤ 150 字** | 一句话定义 + 查阅入口（链接/书名）；禁止大篇展开 |
+
+> ⚠️ **priority 上限是硬约束**：即使 `extend` 概念的 `synthesis_depth=2`，也不得超过 400 字展开。extend/reference 概念在章节综合文档中应"点到为止"，详细内容留给后续真正以它为主题的章节去讲。
+
+**② `synthesis_depth` 下限（地板，仅适用于 `priority=core`）**
 
 | 知识点深度 | 必须包含 | 字数参考 |
 |-----------|---------|--------|
 | depth=1（引介） | 定义 + 类比 + 简单示例 + 常见误解 | 400-700 字 |
-| depth=2（运用） | 完整语法 + ≥2 个可运行代码示例 + 常见陷阱 + 相关概念对比 | 700-1200 字 |
+| depth=2（运用） | **本章场景内**的完整用法 + ≥2 个可运行代码示例 + 本章常见陷阱 + 与直接相关概念对比 | 700-1200 字 |
 | depth=3（原理） | depth=2 的全部 + 底层机制 + JVM/规范层解释 + 版本差异 | 1200-2000 字 |
+
+> ⚠️ **depth=2 的"完整"是章节范围内完整，不是工具/API 文档级完整**。  
+> 示例：javac depth=2 → 会用 `javac HelloWorld.java`、能读懂报错行号和 `error:` 信息、知道常见的 `cannot find symbol` 原因 ✅  
+> 不是 → javac 所有命令行参数（`-cp`、`-d`、`-encoding` 等）、交叉编译选项 ❌（那些属于 depth=3+，后续章节按需引入）
 
 整章文档**最低总字数**：≥4000字；核心概念≥5个的章节应达6000+字。
 
-**原则 3：概念贯通，显式连接（章节综合文档的核心价值）**
+**原则 2.5：差量深度保障（gap_fill 兜底，不可绕过）**
 
-视频文档各自孤立，章节综合文档的核心价值在于"串联"。必须在合适位置显式指出概念间关联：
+对于 `synthesis_treatment = "gap_fill"` 的知识点（视频 `depth < 2` 的 `priority=core` 概念）：
+
+1. **写作深度目标以 `synthesis_depth` 为准，不以视频实际 `depth` 为准。** 视频只讲到 depth=1 → 综合文档必须写到 `synthesis_depth=2`（**本章场景内**的完整用法 + ≥2 个可运行示例 + 本章常见陷阱 + 直接相关概念对比，字数参考 700-1200 字）。
+
+   > **"本章场景内"的约束（防过度展开）**：gap_fill 输出的 depth=2 内容必须锚定在**当前章节实际用到的操作范围**内，不得扩展到后续章节才会用到的高级用法。
+   > - ✅ 应写：`javac HelloWorld.java` 用法 + 编译报错的行号/错误类型阅读方式
+   > - ❌ 不写：`-classpath`、`-d`、`-encoding` 等参数（day01 用不到，后续按需引入）
+   > - ✅ 应写：`cd 文件夹名`、`D:` 盘符切换、`dir` 列目录
+   > - ❌ 不写：`xcopy`、重定向符、批处理脚本（day01 用不到）
+   >
+   > 判据：**"在完成本章所有练习题时，学习者是否会用到这个操作？"** 会用到 → 写；不会用到 → 不写（哪怕它属于该工具的"基础"知识）。
+
+2. **严禁**对 `synthesis_depth ≤ 2` 的内容使用任何推迟注解来替代正文展开——这是 gap_fill 机制的核心约束。正文中不出现"后续深入""扩展了解"等标记，所有后续规划信息统一写入末尾速查表。
+
+3. **速查表收录规则**（根据 `deferred_credibility`，仅适用于 depth≥3 的高阶内容面）：
+   - `"confirmed"` → 速查表"后续规划"列填 `✅ {confirmed_in 章节}`
+   - `"speculative"` / `"none"` → 速查表"后续规划"列填 `❓ 本课程可能不覆盖` + 推荐资料
+
+4. **gap_fill_group 位置**：若 outline.json 中存在 `"is_gap_fill": true` 分组，在占位符追加链末尾写入。节结构同常规 KP 节（无特殊标注），对读者完全透明。
+
+**原则 3：概念贯通，显式连接（仅用承接语，不预告后续）**
+
+视频文档各自孤立，章节综合文档的核心价值在于“串联”。必须在合适位置显式指出概念间关联：
 
 - **承接**：「有了上面对 {概念A} 的认识，下面的 {概念B} 就好理解了——」
 - **对比**：「{概念A} 和 {概念B} 很容易混淆，我们来专门对比一下：」
 - **呼应**：「还记得本章第2节提到的 {概念A} 吗？这里的 {概念B} 正是它的具体体现」
-- **铺垫**：在讲某概念前，先用真实场景引出（"假设你现在需要..."）
-- **依赖说明**：当一个概念 depends_on 另一个时，在该节开头用一句"要理解 {概念B}，需要先有 {概念A} 的基础——{depends_on.reason}"，使读者明白学习顺序的内在逻辑。
+- **铺垫**：在讲某概念前，先用真实场景引出（“假设你现在需要...”）
+- **依赖说明**：当一个概念 depends_on 另一个时，在该节开头用一句“要理解 {概念B}，需要先有 {概念A} 的基础——{depends_on.reason}”
 
-**outline.json 中 `connectors` 字段已规划了每个知识点的连接语句，Full Pass 时必须将它们写进正文。所有连接语必须引用 `central_metaphor`。**
+> ❌ **不预告后续内容**：知识点结尾处**不预告下一节内容或该知识点在后续章节的发展**。正文中不出现 `后续深入`、`你已经见过它了`、`扩展了解` 等推迟注解——这些信息统一收录到文档末尾的「知识点深度与后续规划速查表」中。每个知识点以最后一个技术内容自然结束，避免分散读者对当前知识点的专注力。
+>
+> **区分**：上述规则禁止的是**结构化推迟标记**（blockquote + emoji + 明确说"后续讲/已规划"），而非所有前向提及。正文中为了技术准确性而简短提及后续概念是允许的（如"小范围类型的值可以自动放进大范围类型的容器里"暗示类型转换），只要不使用推迟注解格式、不以此替代正文展开即可。
+
+**outline.json 中 `connectors` 字段仅含 `from_previous`**（承接上一节的过渡语），synthesis pass 时必须将它们写进正文。所有连接语必须引用 `central_metaphor`。
 
 **原则 3.5：中心比喻一致性（`central_metaphor` 约束）**
 
@@ -419,8 +574,7 @@ Outline 设计阶段确定了 `central_metaphor`（全章核心比喻）。Full 
 
 **原则 6：隐性知识妥善安置**
 
-在第一次正式讲解相关语法时，插入：
-> 💡 **你已经见过它了**：在本章视频 {X} 的代码演示中，出现过 `{term}` 这个词。当时先跑起来了，现在来正式学习它。
+隐性知识（代码中出现过但未正式讲解的概念）在正式讲解处**自然展开**，无需插入"你已经见过它了"等提示。正文中像讲解任何新概念一样完整讲解即可。隐性知识的追踪信息（首次出现的视频、正式讲解位置）统一收录到文档末尾的「知识点深度与后续规划速查表」中。
 
 **原则 7：关键帧重新分配**
 
@@ -441,7 +595,7 @@ Outline 设计阶段确定了 `central_metaphor`（全章核心比喻）。Full 
 - `📦 扩展`：强烈建议读，不在速通路径但有助于深理解
 - `🔍 参考`：背景知识，可跳过，遇到问题时回来查
 
-**同时**，文档开头"学习蓝图"中的 30 分钟速通清单仅列 ⭐ 核心概念。读者可自主选择速通还是精读，不强制全量。
+**同时**，文档开头「快速导航」表中的 30 分钟速读列仅列 ⭐ 核心概念。读者可自主选择速读还是精读，不强制全量。
 
 **原则 10：内容类型硬约束（Stage 0 分类结果具有强制力，不可绕过）**
 
@@ -456,20 +610,85 @@ Outline 设计阶段确定了 `central_metaphor`（全章核心比喻）。Full 
 > 💡 **避免误判**：技术决策依据（如"Java 8/17/21 是 LTS 需要选用"）即使来自教师的铺垫性叙述，仍属于 SKILL，不受 exclude 约束。  
 > 判据：**删掉这段内容后，用户在理解技术原理、写代码、调试或部署时会受到影响吗？** 受影响（含影响技术理解）→ SKILL/MENTAL_MODEL；不受影响 → EXCLUDE，无条件丢弃。
 
+**原则 11：权威来源集中展示（正文不内联来源标注）**
+
+正文中**不使用** `> 来源：{锚点}` 内联标注。每个知识点的权威来源统一收录到文档末尾的「📚 权威参考来源」表格中（见步骤 SN+1），按知识点→来源的映射关系列出。正文保持纯粹的技术讲解，不被来源标注打断阅读流。
+
 ---
 
-> ✅ **Pass 2a 完成检查点**：确认 `create_file` 保存成功（文件存在且非空）后，告知用户  
-> "✅ CHAPTER_SYNTHESIS 已保存，请发送任意消息继续 Pass 2b（练习题）"。**等待用户确认后才继续。**
+> ✅ **Pass 2a 完成检查点**：确认步骤 SN+1（尾部区块 replace）成功、`<!-- SYNTHESIS_PENDING -->` 占位符已消亡后，告知用户  
+> “✅ CHAPTER_SYNTHESIS 已保存（共 N 组写入）”，然后按规则 A 自行判断是否继续。
 
 ---
 
 ## Pass 2b · 章节练习文档（`PASS_MODE = "exercises"`）
 
-> 🔴 **强制输出卡点**：本轮次**唯一任务**是生成并保存 `CHAPTER_EXERCISES_*.md`，生成后立即 `create_file`，**不得继续生成 Anki**。  
-> **前置**：使用 `read_file` 读取磁盘上 Pass 2a 保存的：  
-> `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/CHAPTER_SYNTHESIS_{chapter_dir_name}.md`  
-> （禁止依赖上一轮内存中的内容——新轮次上下文已刷新）。  
-> 保存成功后告知用户"✅ Pass 2b 完成，请发送任意消息继续 Pass 2c（Anki）"。
+> 🔴 **强制输出卡点**：本 Pass 的任务是生成并保存 `CHAPTER_EXERCISES_*.md`。必须使用占位符追加链分步写入，严禁一次性生成。
+> EXERCISES 完整保存后，AI 自行评估剩余容量决定是否继续生成 ANKI（规则 A）。
+
+### 🔴 Pass 2b 执行协议（占位符追加链 + code_anchors 主源）
+
+**前置步骤（禁止跳过）**：
+1. **若有 Outline Pass 产物**：使用 `read_file` 加载 `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`（Pass 1 产物，禁止依赖上一轮内存）
+   - 获取 `synthesis_plan.groups`（分组规划，与 synthesis pass 同一套分组）
+   - 获取每个 KP 的 `code_anchors`（精准出题锚点）
+   - 获取 `total_estimate_words`（决定走哪条输入策略）
+   **若轻量章节（无 outline.json）**：使用 `read_file` 一次性读取 CHAPTER_SYNTHESIS 全文作为出题依据，从文中提取知识点和代码示例作为出题锚点
+2. 根据章节体量选择输入策略：
+
+| synthesis 预估字数 | 主出题源 | 补充读取 |
+|---|---|---|
+| < 8,000 字（轻量）| `read_file` 一次性读取 SYNTHESIS 全文 | 无需额外操作 |
+| 8,000 – 20,000 字（标准）| outline.json 各 KP 的 `code_anchors` | 可选：按 groups 分段读 SYNTHESIS 对应节强化细节 |
+| > 20,000 字（大型）| **仅用 outline.json + `code_anchors`**，不读取 SYNTHESIS 文件 | 无 |
+
+**执行步骤（占位符追加链，输入输出双侧受控）**：
+
+**步骤 E0：确认分组**
+复用 `synthesis_plan.groups` 的分组（与 synthesis pass 完全一致），确保每组练习与综合文档节结构对齐。
+
+**步骤 E1：写练习文档头部**（`create_file`，仅头部骨架，生成量极小）
+
+```
+# 练习题 · {CHAPTER_NAME}
+
+> 来源：综合本章 {N} 个视频的知识内容
+> 本章知识文档：[CHAPTER_SYNTHESIS_{chapter_dir_name}.md](./CHAPTER_SYNTHESIS_{chapter_dir_name}.md)
+
+---
+
+<!-- EXERCISES_PENDING -->
+```
+
+> ❗ `<!-- EXERCISES_PENDING -->` 是追加链占位符，**必须原样写入**，后续 replace 操作依赖它。
+
+**步骤 E2 ~ EN：逐组生成练习题**（每组 `replace_string_in_file`，每步生成量控制在安全范围内）
+
+对第 G 组（按 `synthesis_plan.groups` 顺序）：
+1. 从已读入的 outline.json 取该组所有 KP 的 `code_anchors` 作为出题锚点
+2. 若是轻量章节，可直接引用已读入的 SYNTHESIS 文本对应节
+3. 基于锚点生成该组练习题（含题干 + 参考答案 + `📖 参考：CHAPTER_SYNTHESIS 第 X 节`）
+4. 调用 `replace_string_in_file`：
+   - `old_string` = `<!-- EXERCISES_PENDING -->`
+   - `new_string` = `{第 G 组的所有练习题文本}` + 两个换行 + `<!-- EXERCISES_PENDING -->`
+
+> 💡 占位符逐组向后推移，每次写盘前生成量控制在安全范围内，彻底消除输出截断风险。
+
+**步骤 EN+1：面试题专区**（`replace_string_in_file`，**占位符后移，继续留存**）
+
+基于 outline.json 中全部 ⭐（`priority=core`）KP 的 `code_anchors` + `central_metaphor` 生成"面试题精选"区块（生成量可能较大，因此独立成一步）：
+- `old_string` = `<!-- EXERCISES_PENDING -->`
+- `new_string` = `{面试题精选区块，含全部面试题 Q&A}` + 两个换行 + `<!-- EXERCISES_PENDING -->`
+
+**步骤 EN+2：总练习索引**（`replace_string_in_file`，**占位符消亡**）
+
+生成本章练习的简洁知识点→题号映射索引（内容极小，约 50-100 字）：
+- `old_string` = `<!-- EXERCISES_PENDING -->`
+- `new_string` = `{总练习索引}`（不添加新占位符，占位符至此消亡）
+
+两步全部完成后，告知用户“✅ Pass 2b 完成”。然后 **AI 自行评估剩余输出容量**：充足则直接继续 Pass 2c，不足则告知用户“请发送任意消息继续 Pass 2c（Anki）”。
+
+---
 
 ### 产物（Pass 2b）：章节练习文档（CHAPTER_EXERCISES.md）
 
@@ -487,9 +706,9 @@ Outline 设计阶段确定了 `central_metaphor`（全章核心比喻）。Full 
 > 📌 **章节练习 = 从章节知识文档出发，全面覆盖，系统生成**
 > 视频级不再生成练习题，章节练习是本学习包中唯一的练习来源，必须完整覆盖本章所有知识点。
 
-**阶段 1：基于 CHAPTER_SYNTHESIS.md 系统生成全章题目集**
+**阶段 1：系统生成全章题目集**
 
-以 CHAPTER_SYNTHESIS.md 为唯一知识源，为每个知识点（depth≥1）生成题目：
+以 CHAPTER_SYNTHESIS.md（或 outline.json 的 `code_anchors`，取决于上方执行协议中的输入策略）为知识源，为每个知识点（depth≥1）生成题目：
 
 1. **覆盖性要求**：每个 `priority=core`（⭐）概念出 2-3 道；`priority=extend`（📦）概念出 1-2 道；`priority=reference`（🔍）概念视难度出 0-1 道
 2. **题型分布**：每个概念至少有一道"概念理解题"；有代码示例的概念出"代码题"；易混淆概念出"对比题"
@@ -522,15 +741,17 @@ Outline 设计阶段确定了 `central_metaphor`（全章核心比喻）。Full 
 ---
 
 > ✅ **Pass 2b 完成检查点**：确认文件保存成功后，告知用户  
-> "✅ CHAPTER_EXERCISES 已保存，请发送任意消息继续 Pass 2c（Anki）"。**等待用户确认后才继续。**
+> “✅ CHAPTER_EXERCISES 已保存”，然后按规则 A 自行判断是否继续。
 
 ---
 
 ## Pass 2c · Anki 卡包（`PASS_MODE = "anki"`）
 
 > 🔴 **强制输出卡点**：本轮次**唯一任务**是生成 CSV 并打包 apkg。  
-> **前置**：使用 `read_file` 读取磁盘上的：  
-> `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/CHAPTER_SYNTHESIS_{chapter_dir_name}.md`  
+> **前置**：
+> 1. **若有 Outline Pass 产物**：读取 `{CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json`——获取各 KP 的 `code_anchors`、`depth`、`priority`、`content_type`，这是 Anki 卡片类型和数量决策的主依据（禁止依赖上一轮内存）
+>    **若轻量章节（无 outline.json）**：使用 `read_file` 读取 CHAPTER_SYNTHESIS 全文，从文中提取知识点和代码示例作为卡片生成依据
+> 2. 标准/大型章节根据 `total_estimate_words` 决定是否补充读取 SYNTHESIS：< 8,000 字时可 `read_file` 读取全文补充细节；≥ 8,000 字时仅凭 outline.json 的 `code_anchors` 生成，不读取大文件  
 > CSV 生成后立即 `create_file`，再调用 `export_anki_package`。  
 > 完成后告知用户"✅ Pass 2c 完成，章节学习包生成完毕"。
 
@@ -582,11 +803,12 @@ Java全栈::{课程文件夹}::{chapter文件夹}
 - [ ] 文档中无"详见 knowledge_XXX.md"之类的替代引用
 
 **结构与顺序**
-- [ ] 文档开头有"📋 本章学习蓝图"区块（含学习目标、知识关联总览、速通清单、完整路径、前后章连接）
+- [ ] 文档开头有"学习目标"列表 + "快速导航"表（含 30分钟速读、完整学习、前置要求、下一章依赖四行）
 - [ ] 完整目录，带内部跳转链接
 - [ ] 所有知识点按"最优认知顺序"排列（`narrative_position`），非按视频顺序
 - [ ] 每个知识点节标题带优先级标记（⭐/📦/🔍）
-- [ ] 节与节之间有承接语（来自 outline.json `connectors`），且引用了 `central_metaphor`
+- [ ] 节与节之间有承接语（来自 outline.json `connectors.from_previous`），且引用了 `central_metaphor`
+- [ ] 知识点结尾处无"预告下一节"或"后续发展方向"类叙事过渡，无内联推迟注解
 - [ ] 有依赖关系的知识点节开头有"理解 B 需要先有 A 的基础——{reason}"说明
 
 **内容纯洁性（Stage 0 强制检查）**
@@ -596,9 +818,14 @@ Java全栈::{课程文件夹}::{chapter文件夹}
 
 **内容完整性**
 - [ ] 同一概念在多个视频涉及的 → 已合并为一个完整节（不是多处摘要）
-- [ ] 隐性知识（`implicit_concepts`）已在正式讲解处加"你已经见过它了"提示
-- [ ] 末尾有"📌 本章已引入但后续才完整的概念"预报表（含 current/max depth 列）
-- [ ] 末尾有"📝 本章练习索引"（知识点 → 题目编号对应表）
+- [ ] 隐性知识（`implicit_concepts`）已在正式讲解处自然展开（无需"你已经见过它了"内联提示）
+- [ ] 正文中**不存在**任何 `💡 后续深入`、`📚 扩展了解`、`💡 你已经见过它了` 等内联推迟注解
+- [ ] 深度缺口和后续规划信息已在文档末尾「📋 知识点深度与后续规划速查表」中列出（若有需要列入的条目）
+- [ ] 文档末尾结构为：权威参考来源表 → 速查表（若有）→ 收尾行（"本章学习手册完 · 共 N 个知识点"）
+
+**来源标注**
+- [ ] **正文中无任何 `> 来源：` 内联标注**（所有权威来源统一在末尾「📚 权威参考来源」表格中列出）
+- [ ] 末尾「📚 权威参考来源」表格覆盖了所有 ⭐ 核心概念的权威来源（P1/P2/P3 锚点）
 
 **练习与 Anki**
 - [ ] 每个 ⭐ 核心概念均有 2-3 道对应练习题
@@ -612,7 +839,10 @@ Java全栈::{课程文件夹}::{chapter文件夹}
 - [ ] 已调用 `scan_chapter_completeness` 生成 `chapter_completeness_audit.md`（兜底机制 2）
 - [ ] `COMPLETENESS_AUDIT` 中列出的所有「待补全清单」项已在以下某处被处理：正文中有说明 / 预报表中已标注
 
-**兜底机制 3 — 深度完整性预报**
-- [ ] CHAPTER_SYNTHESIS 末尾包含「📌 本章已引入但后续才完整的概念」预报表（**兜底机制 3，必备**）
-- [ ] 预报表包含 current_depth / expected_max_depth / 何时完整讲解 三列
-- [ ] 图谱中所有 `implicit_concepts`（depth=0.5）已出现在预报表或正文的「你已经见过它了」提示块中
+**隐性知识与深度提示**
+- [ ] 图谱中所有 `implicit_concepts`（depth=0.5）已在正文相关讲解处自然展开（不使用"你已经见过"提示）
+- [ ] 隐性知识的追踪信息（首次出现视频 + 正式讲解位置）已写入末尾速查表
+- [ ] depth < expected_max_depth 的概念已按 `deferred_credibility` 写入末尾速查表：`confirmed` → ✅ + 后续章节；`speculative/none` → ❓ + 推荐资料
+- [ ] **正文中无任何内联推迟注解**（`💡 后续深入` / `📚 扩展了解` / `💡 你已经见过它了` 均不得出现在正文中）
+- [ ] **gap_fill 兜底检查（强制）**：`COMPLETENESS_AUDIT` 中所有 `priority=core` 的浅层核心概念（在本章视频中 `depth < 2`），要么已在正文以 `synthesis_depth=2` 完整展开；要么已归入 `gap_fill_group`；【不允许】仅在速查表标注了事
+- [ ] **开发者深度门控检查**：每个 `priority=core` 的 KP 均已通过深度门控（outline.json `depth_gate_result` 字段为 `"pass"` 或 `"escalated"`）

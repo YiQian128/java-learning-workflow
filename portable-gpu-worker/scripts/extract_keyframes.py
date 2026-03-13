@@ -23,6 +23,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+WORKER_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _portable_path(path: Path, root: Path = WORKER_ROOT) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return str(path)
+
 
 def _get_video_duration(video: Path) -> float:
     try:
@@ -549,7 +558,7 @@ def extract_keyframes(
     shutil.rmtree(out_dir / "_words_guided_tmp", ignore_errors=True)
 
     index_data = {
-        "video": str(video),
+        "video": _portable_path(video),
         "duration_s": round(duration, 3) if duration > 0 else None,
         "total_frames": len(frame_index),
         "method": method_used,

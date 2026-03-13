@@ -227,7 +227,7 @@ def main():
 
             result = subprocess.run(
                 [str(python), str(generate_script), "--csv", str(output_csv), "--output", apkg_path],
-                capture_output=True, text=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
             if result.returncode == 0:
                 print(f"已生成 .apkg：{output_apkg}")

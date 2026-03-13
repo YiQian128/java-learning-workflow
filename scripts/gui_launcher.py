@@ -67,6 +67,8 @@ _MODELS_COPILOT = {
     "cop-claude-opus-4.6":   {"label": "Claude Opus 4.6",   "budget":  70_000, "ctx": 128_000},
     "cop-claude-haiku-4.5":  {"label": "Claude Haiku 4.5",  "budget":  60_000, "ctx": 128_000},
     # ── GPT Codex 大窗口（272K × 0.52 ≈ 140k）──────────────────────────────────
+    "cop-gpt-5.4-codex":     {"label": "GPT-5.4-Codex",     "budget": 140_000, "ctx": 272_000},
+    # ── GPT Codex 大窗口（272K × 0.52 ≈ 140k）──────────────────────────────────
     "cop-gpt-5.3-codex":     {"label": "GPT-5.3-Codex",     "budget": 140_000, "ctx": 272_000},
     "cop-gpt-5.2-codex":     {"label": "GPT-5.2-Codex",     "budget": 140_000, "ctx": 272_000},
     # ── GPT 标准（128K × 0.55 ≈ 70k）───────────────────────────────────────────
@@ -91,6 +93,7 @@ _MODELS_CURSOR = {
 }
 
 _MODELS_CODEX = {
+    "codex-gpt-5.4-codex":      {"label": "GPT-5.4-Codex",     "budget": 150_000, "ctx": 272_000},
     "codex-gpt-5.3-codex":      {"label": "GPT-5.3-Codex",     "budget": 150_000, "ctx": 272_000},
     "codex-gpt-5.2-codex":      {"label": "GPT-5.2-Codex",     "budget": 140_000, "ctx": 272_000},
     "codex-gpt-5.1-codex-max":  {"label": "GPT-5.1-Codex-Max", "budget": 110_000, "ctx": 128_000},
@@ -115,11 +118,11 @@ _ENV_MODELS: dict[str, dict] = {
 }
 
 _ENV_DEFAULT: dict[str, str] = {
-    "claude-code": "claude-sonnet",
-    "copilot":     "cop-claude-sonnet-4.6",
-    "cursor":      "cur-claude-sonnet",
-    "codex":       "codex-gpt-5.1-codex",
-    "generic":     "claude-sonnet",
+    "claude-code": "claude-opus",
+    "copilot":     "cop-claude-opus-4.6",
+    "cursor":      "cur-claude-opus",
+    "codex":       "codex-gpt-5.4-codex",
+    "generic":     "claude-opus",
 }
 
 _ENV_BADGE: dict[str, tuple[str, str]] = {
@@ -162,6 +165,10 @@ CLR_SESSION  = "#2a3a5a"
 # ── 数据层 ────────────────────────────────────────────────────────────────────
 def _safe_dirname(stem: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', '_', stem).strip('. ')
+
+
+def _workspace_relative(path: Path) -> str:
+    return str(path.resolve().relative_to(WORKSPACE.resolve())).replace("\\", "/")
 
 def _srt_bytes(video_stem: str, course: str, day: str) -> int:
     """返回视频字幕文件总字节数（用于估算 token 消耗）。"""
@@ -252,6 +259,7 @@ def scan_chapters() -> dict:
                 "course": course_dir.name,
                 "day": day_dir.name,
                 "path": str(day_dir),
+                "path_portable": _workspace_relative(day_dir),
                 "total": total,
                 "completed": completed,
                 "preprocessed": preprocessed,
@@ -762,6 +770,7 @@ class LauncherApp(tk.Tk):
                     "📄 knowledge_*.md    知识文档",
                 ])
                 section("全章完成后统一生成（多轮对话）", [
+                    "  [Pass1] chapter_outline.json   章节大纲（标准/大型章节）",
                     "📘 CHAPTER_SYNTHESIS_*.md   章节学习手册（Pass 2a）",
                     "📝 CHAPTER_EXERCISES_*.md   全章练习题集（Pass 2b）",
                     "🃏 CHAPTER_ANKI_*.apkg      全章 Anki 卡包（Pass 2c）",
@@ -805,11 +814,13 @@ class LauncherApp(tk.Tk):
                         "🃏 CHAPTER_ANKI_*.apkg      全章 Anki 卡包（基于章节综合从零生成）",
                         "📄 chapter_completeness_audit.md   待补全清单",
                     ], CLR_DONE)
-                    section("⚠ 生成方式：多轮对话（非一次完成）", [
-                        "  Pass 2a → SYNTHESIS（保存后等确认）",
-                        "  Pass 2b → EXERCISES（读磁盘 synthesis，保存后等确认）",
-                        "  Pass 2c → ANKI（读磁盘 synthesis，生成 CSV + apkg）",
-                        "  标准章节额外先做：Pass 1 → outline.json",
+                    section("⚠ 生成方式：分 Pass 逐件生成", [
+                        "  Pass 1 → outline.json（标准/大型章节）",
+                        "  Pass 2a → SYNTHESIS（占位符追加链逐组写入）",
+                        "  Pass 2b → EXERCISES（读磁盘 outline.json）",
+                        "  Pass 2c → ANKI（生成 CSV + apkg）",
+                        "  轻量章节（≤15 KP）跳过 Pass 1，直接从 Pass 2a 开始",
+                        "  每件保存后 AI 自动评估是否继续",
                     ], CLR_INFO)
             else:
                 section("说明", [
@@ -877,7 +888,9 @@ class LauncherApp(tk.Tk):
             "course": info["course"],
             "day": info["day"],
             "day_path": info["path"],
+            "day_path_portable": info["path_portable"],
             "chapter_output_dir": str(OUTPUT_DIR / info["course"] / info["day"]),
+            "chapter_output_dir_portable": _workspace_relative(OUTPUT_DIR / info["course"] / info["day"]),
             "total": info["total"],
             "completed": info["completed"],
             "preprocessed": info["preprocessed"],
@@ -904,6 +917,7 @@ class LauncherApp(tk.Tk):
             self.lbl_sel.config(text="⚠ 请先点击左侧章节行选择目标", fg=CLR_WARN)
             return
         info = self.chapters[self.selected_chapter_key]
+        model_key = self.selected_model.get()
         self.result = {
             "action": "synthesis",
             "env": self.env,
@@ -911,11 +925,15 @@ class LauncherApp(tk.Tk):
             "course": info["course"],
             "day": info["day"],
             "day_path": info["path"],
+            "day_path_portable": info["path_portable"],
             "total": info["total"],
             "completed": info["completed"],
             "preprocessed": info["preprocessed"],
             "pending": info["pending"],
             "chapter_output_dir": str(OUTPUT_DIR / info["course"] / info["day"]),
+            "chapter_output_dir_portable": _workspace_relative(OUTPUT_DIR / info["course"] / info["day"]),
+            "model": model_key,
+            "token_budget": self.model_presets[model_key]["budget"],
         }
         _write_result_file(self.result)   # 立即写文件
         self.destroy()

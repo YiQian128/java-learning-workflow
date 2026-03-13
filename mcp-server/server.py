@@ -60,6 +60,85 @@ def _safe_dirname(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', '_', name).strip('. ')
 
 
+def _to_portable_relative(path_str: str, root: Path) -> str:
+    """将绝对或混杂路径归一化为相对于指定根目录的可移植路径。"""
+    if not path_str:
+        return ""
+
+    raw = str(path_str).replace("\\", "/")
+    try:
+        root_resolved = root.resolve()
+        candidate = Path(path_str)
+        if candidate.is_absolute():
+            return str(candidate.resolve().relative_to(root_resolved)).replace("\\", "/")
+    except Exception:
+        pass
+
+    marker = f"{root.name}/"
+    if marker in raw:
+        return raw[raw.index(marker) + len(marker):]
+
+    return raw
+
+
+def _to_project_relative(path_str: str) -> str:
+    """归一化为相对于项目根目录的可移植路径。"""
+    return _to_portable_relative(path_str, PROJECT_ROOT)
+
+
+def _normalize_persisted_path(path_str: str, preferred_root: Path) -> str:
+    """优先归一化到目标根目录；失败时至少退化为项目内相对路径。"""
+    normalized = _to_portable_relative(path_str, preferred_root)
+    raw = str(path_str).replace("\\", "/")
+    if normalized == raw:
+        return _to_project_relative(path_str)
+    return normalized
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | list[Any] | None:
+    if not path.exists():
+        return None
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def _describe_topics_schema(path: Path) -> dict[str, Any]:
+    payload = _read_json_file(path)
+    result = {
+        "schema_variant": "missing",
+        "has_video_info": False,
+        "normalized_processing_mode": None,
+        "top_level_keys": [],
+    }
+
+    if not isinstance(payload, dict):
+        if payload is not None:
+            result["schema_variant"] = "invalid"
+        return result
+
+    top_level_keys = list(payload.keys())
+    result["top_level_keys"] = top_level_keys[:12]
+
+    video_info = payload.get("video_info")
+    if isinstance(video_info, dict):
+        result["schema_variant"] = "current"
+        result["has_video_info"] = True
+        result["normalized_processing_mode"] = video_info.get("processing_mode") or payload.get("processing_mode")
+        return result
+
+    if "processing_mode" in payload:
+        result["schema_variant"] = "legacy-flat"
+        result["normalized_processing_mode"] = payload.get("processing_mode")
+        return result
+
+    result["schema_variant"] = "unknown-dict"
+    return result
+
+
 def _get_output_paths(video_stem: str, video_path: str = None) -> dict:
     """获取视频对应的输出路径结构。
 
@@ -951,6 +1030,7 @@ async def _check_preprocessing_status(args: dict) -> list[TextContent]:
 
     topics_json = prep_dir / f"{safe_stem}_topics.json"
     teaching_style_json = prep_dir / f"{safe_stem}_teaching_style.json"
+    topics_schema = _describe_topics_schema(topics_json)
 
     status = {
         "video": str(video),
@@ -972,11 +1052,17 @@ async def _check_preprocessing_status(args: dict) -> list[TextContent]:
             "frames_dir": {
                 "path": paths["frames"],
                 "exists": frames_dir.exists(),
-                "count": len(frame_list)
+                "count": len(frame_list),
+                "frames_index_json": str(frames_dir / "frames_index.json"),
+                "frames_index_exists": (frames_dir / "frames_index.json").exists()
             },
             "topics_json": {
                 "path": str(topics_json),
                 "exists": topics_json.exists(),
+                "schema_variant": topics_schema["schema_variant"],
+                "has_video_info": topics_schema["has_video_info"],
+                "normalized_processing_mode": topics_schema["normalized_processing_mode"],
+                "top_level_keys": topics_schema["top_level_keys"],
                 "note": "A1 字幕分析阶段产物（话题清单），若不存在需重新运行 A1_subtitle_analysis.md"
             },
             "teaching_style_json": {
@@ -1018,6 +1104,9 @@ async def _check_preprocessing_status(args: dict) -> list[TextContent]:
             status["recommendation"] = (
                 "需要先运行预处理: 请使用 portable-gpu-worker 的 0_开始使用.bat，选择 [3] 开始预处理"
             )
+
+    if topics_schema["schema_variant"] == "legacy-flat":
+        status["recommendation"] += "；检测到旧版 flat topics schema，建议先做产物迁移或重新运行 A1 以统一到 video_info 结构"
 
     return [TextContent(type="text", text=json.dumps(status, ensure_ascii=False, indent=2))]
 
@@ -1123,7 +1212,7 @@ async def _run_bootstrap(args: dict) -> list[TextContent]:
         return [TextContent(type="text", text="ERROR: scripts/bootstrap.py not found")]
 
     try:
-        returncode, stdout, stderr = await _run_subprocess(sys.executable, str(bootstrap), timeout=300)
+        returncode, stdout, stderr = await _run_subprocess(_get_python(), str(bootstrap), timeout=300)
         output = stdout + stderr
         return [TextContent(type="text", text=output)]
     except asyncio.TimeoutError:
@@ -1264,7 +1353,7 @@ def _migrate_concept_inplace(cdata: dict) -> None:
     if isinstance(apps, list) and apps:
         first = apps[0]
         cdata.setdefault("first_seen", first.get("video_stem", ""))
-        cdata.setdefault("first_doc",  first.get("doc", ""))
+        cdata.setdefault("first_doc", _to_portable_relative(first.get("doc", ""), OUTPUT_DIR))
         if len(apps) > 1:
             cdata.setdefault("last_seen", apps[-1].get("video_stem", ""))
         cdata.setdefault("seen_count", len(apps))
@@ -1281,6 +1370,10 @@ def _migrate_concept_inplace(cdata: dict) -> None:
     elif "implicit_seen_in" in cdata:
         del cdata["implicit_seen_in"]
 
+    # 归一化旧图谱中残留的绝对路径
+    if cdata.get("first_doc"):
+        cdata["first_doc"] = _normalize_persisted_path(cdata["first_doc"], OUTPUT_DIR)
+
 
 async def _query_knowledge_graph(args: dict) -> list[TextContent]:
     graph = _load_knowledge_graph()
@@ -1290,6 +1383,12 @@ async def _query_knowledge_graph(args: dict) -> list[TextContent]:
     for cdata in concepts.values():
         if "appearances" in cdata or "implicit_seen_in" in cdata:
             _migrate_concept_inplace(cdata)
+
+    for vdata in graph.get("video_index", {}).values():
+        if vdata.get("video_path"):
+            vdata["video_path"] = _normalize_persisted_path(vdata["video_path"], VIDEOS_DIR)
+        if vdata.get("knowledge_doc"):
+            vdata["knowledge_doc"] = _normalize_persisted_path(vdata["knowledge_doc"], OUTPUT_DIR)
 
     if args.get("list_all"):
         chapter_filter = args.get("chapter_filter", "").strip()
@@ -1397,12 +1496,8 @@ async def _update_knowledge_graph(args: dict) -> list[TextContent]:
     chapter_summary = args.get("chapter_summary", "")
 
     # 推断文档的相对路径（相对于 OUTPUT_DIR）
-    doc_rel_path = knowledge_doc_path
-    if knowledge_doc_path:
-        try:
-            doc_rel_path = str(Path(knowledge_doc_path).relative_to(OUTPUT_DIR))
-        except ValueError:
-            doc_rel_path = knowledge_doc_path
+    doc_rel_path = _normalize_persisted_path(knowledge_doc_path, OUTPUT_DIR)
+    video_rel_path = _normalize_persisted_path(video_path, VIDEOS_DIR)
 
     # 记录到 video_index
     covered_concept_ids: list[str] = []
@@ -1483,7 +1578,7 @@ async def _update_knowledge_graph(args: dict) -> list[TextContent]:
 
     # 记录到 video_index（包含本视频覆盖的概念列表，供章节过滤使用）
     video_index[video_stem] = {
-        "video_path":    video_path,
+        "video_path":    video_rel_path,
         "knowledge_doc": doc_rel_path,
         "processing_mode": processing_mode,
         "chapter_summary": chapter_summary,
@@ -1512,6 +1607,7 @@ async def _read_chapter_summaries(args: dict) -> list[TextContent]:
 
     graph = _load_knowledge_graph() if include_graph else {}
     video_index = graph.get("video_index", {})
+    chapter_dir_rel = _to_project_relative(str(chapter_dir))
 
     summaries = []
     for video_dir in sorted(chapter_dir.iterdir()):
@@ -1550,13 +1646,13 @@ async def _read_chapter_summaries(args: dict) -> list[TextContent]:
 
         summaries.append({
             "video_stem": video_stem,
-            "dir": str(video_dir),
+            "dir": _to_project_relative(str(video_dir)),
             "has_knowledge_doc": bool(knowledge_files),
             "processing_mode": graph_data.get("processing_mode", "unknown"),
             "chapter_summary": graph_data.get("chapter_summary", saved_summary.get("summary", "")),
             "doc_preview": doc_preview,
             "saved_summary": saved_summary,
-            "knowledge_doc_path": str(knowledge_files[0]) if knowledge_files else None,
+            "knowledge_doc_path": _to_project_relative(str(knowledge_files[0])) if knowledge_files else None,
         })
 
     # 从知识图谱中提取本章相关概念
@@ -1584,7 +1680,7 @@ async def _read_chapter_summaries(args: dict) -> list[TextContent]:
     unprocessed = [s["video_stem"] for s in summaries if not s["has_knowledge_doc"]]
 
     return [TextContent(type="text", text=json.dumps({
-        "chapter_dir": str(chapter_dir),
+        "chapter_dir": chapter_dir_rel,
         "total_videos": len(summaries),
         "processed_videos": sum(1 for s in summaries if s["has_knowledge_doc"]),
         "unprocessed_videos": unprocessed,
@@ -1696,13 +1792,14 @@ async def _scan_chapter_completeness(args: dict) -> list[TextContent]:
     try:
         with open(audit_path, "w", encoding="utf-8") as f:
             f.write(audit_content)
-    except IOError as e:
+    except IOError:
+        # Non-fatal: audit content is still returned in the JSON response below
         pass
 
     return [TextContent(type="text", text=json.dumps({
         "status": "success",
-        "chapter_dir": str(chapter_dir),
-        "audit_path": str(audit_path),
+        "chapter_dir": _to_project_relative(str(chapter_dir)),
+        "audit_path": _to_project_relative(str(audit_path)),
         "implicit_not_explained": implicit_not_explained,
         "shallow_but_important": shallow_but_important,
         "multi_aspect_partial": multi_aspect_partial,

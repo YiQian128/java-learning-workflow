@@ -24,6 +24,8 @@ portable-gpu-worker/output/**
 # 运行时临时文件
 scripts/_gui_result.json
 anki_result.txt
+tmp/
+mcp_test_*.txt
 
 # 生成产物
 *.apkg
