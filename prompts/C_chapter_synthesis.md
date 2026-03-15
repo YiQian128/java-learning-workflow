@@ -84,7 +84,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 > 每件产物保存完成后，AI 自行评估剩余容量，充足则直接继续下一件，不足则等待用户确认（规则 A）。
 
-> 轻量章节即使预估 ≤ 8000 字，synthesis pass 也**必须**使用占位符追加链（见 Pass 2a），保证每次写盘前生成量在单次响应安全范围内（参考 3-5 个知识点）。
+> 轻量章节即使预估 ≤ 8000 字，synthesis pass 也**必须**使用占位符追加链（见下方 §Synthesis Pass），保证每次写盘前生成量在单次响应安全范围内（参考 3-5 个知识点）。
 
 ---
 
@@ -215,7 +215,6 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
   "knowledge_points": [
     "<!-- KP_PENDING -->"
   ],
-  "implicit_knowledge_to_mention": [],
   "synthesis_plan": "<!-- SYNPLAN_PENDING -->"
 }
 ```
@@ -226,7 +225,32 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 **步骤 O2 ~ ON：逐组填充 KP 对象**（每组 `replace_string_in_file`，每组 **3-5 个 KP**，生成量控制在单次响应安全范围内）
 
-每个 KP 对象包含以下全部字段（参考下方 KP 字段说明）：`id` / `display_name` / `priority` / `source_videos` / `depth` / `narrative_position` / `summary` / `key_frame` / `depends_on` / `depth_treatment` / `word_count_target` / `content_type` / `synthesis_treatment` / `synthesis_depth` / `deferred_credibility` / `deferred_aspects` / `max_words` / `connectors` / `code_anchors`
+每个 KP 对象包含以下全部字段（参考下方 KP 字段说明）：`id` / `display_name` / `priority` / `source_videos` / `depth` / `narrative_position` / `summary` / `key_frame` / `depends_on` / `depth_treatment` / `word_count_target` / `content_type` / `synthesis_treatment` / `synthesis_depth` / `deferred_credibility` / `deferred_aspects` / `max_words` / `connectors` / `code_anchors` / `depth_gate_result`
+
+> **KP 字段速查表**（避免歧义，所有字段的数据类型和语义一次性定义如下）：
+>
+> | 字段 | 类型 | 说明 |
+> |------|------|------|
+> | `id` | string | 概念唯一标识符（`java.` 前缀 + snake_case，如 `java.jdk_jre_jvm`） |
+> | `display_name` | string | 人类可读名称（如 "JDK / JRE / JVM"） |
+> | `priority` | string | `"core"` ⭐ / `"extend"` 📦 / `"reference"` 🔍 |
+> | `source_videos` | string[] | 主讲视频列表（视频 stem） |
+> | `depth` | number | 图谱中当前深度（0.5-4，对应 Layer 0 深度级别） |
+> | `narrative_position` | integer | 知识点在章节内的**阅读顺序**，从 1 开始递增（按认知递进排列，非视频编号顺序） |
+> | `summary` | string | 1-2 句话概述该知识点核心内容 |
+> | `key_frame` | string\|null | 推荐关键帧路径（如 `01-xxx/_preprocessing/frames/frame_003.jpg`），无合适帧时为 null |
+> | `depends_on` | object[] | 前置依赖列表，每项含 `id`（依赖的 KP id）和 `reason`（为什么必须先学） |
+> | `depth_treatment` | string | `"full"` / `"reference_only"` / `"deepen"` — 本章对该概念的处理方式 |
+> | `word_count_target` | integer | 预估该 KP 在 SYNTHESIS 中的字数（depth=1→500, depth=2→900, depth=3→1500） |
+> | `content_type` | string | Stage 0 分类结果：`"skill"` / `"mental_model"` / `"exclude"` |
+> | `synthesis_treatment` | string | `"normal"` / `"brief"` / `"gap_fill"` — normal=正常写作；brief=精简写作（仅保留核心定义，受 max_words 硬限）；gap_fill=兜底补写（synthesis_depth≥2） |
+> | `synthesis_depth` | integer | Synthesis Pass 中的实际写作深度（可能高于 depth，由 gap_fill 或 depth_gate 提升） |
+> | `deferred_credibility` | string\|null | `"confirmed"` / `"speculative"` / `"none"` — 后续规划的可信度 |
+> | `deferred_aspects` | string[] | 仅 deferred_credibility="confirmed" 时填写，列高阶内容面（depth≥3） |
+> | `max_words` | integer\|null | 硬字数上限（extend→400, reference→150, core→null 即无硬限） |
+> | `connectors` | object | 含 `from_previous`（承接上一节的过渡语）；必须引用 `central_metaphor` |
+> | `code_anchors` | string[] | 3-5 条出题精华片段（≤25字/条），Pass 2b/2c 的主出题锚点 |
+> | `depth_gate_result` | string | 开发者深度门控结果：`"pass"` / `"escalated"` / `"deferred"` |
 
 对第 G 组（G = 1 … N-1）：
 - `old_string` = `"<!-- KP_PENDING -->"`
@@ -240,9 +264,12 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 
 **KP 对象字段填写规则（O2 至 ON 写入每个 KP 对象时填写，与 ON+1 步骤无关）**：
 
-> **`code_anchors` 字段**（Pass 2b/2c 精准出题锚点，每个非 exclude 的 KP 必须填写）：在阅读 `CHAPTER_SUMMARIES` 过程中，为每个 KP 提炼 3-5 个"出题精华片段"。**格式**：每条 ≤ 25 字，包含具体命令/报错信息/语法/数字。`code_anchors` 为空或只有泛泛描述时，exercises pass 无法出精准题。
+> **`code_anchors` 字段**（Pass 2b/2c 精准出题锚点，每个非 exclude 的 KP 必须填写）：在阅读 `CHAPTER_SUMMARIES` 过程中，为每个 KP 提炼 3-5 个"出题精华片段"。**格式**：每条 ≤ 25 字，包含具体命令/报错信息/语法/数字。对于**概念性 KP**（无代码/命令的纯概念，如"JDK/JRE/JVM 区别"），`code_anchors` 填写关键区分点、定义性陈述或对比要点（如"JDK 包含 JRE，JRE 包含 JVM"）。`code_anchors` 为空或只有泛泛描述时，exercises pass 无法出精准题。
 >
 > **`synthesis_depth` / `deferred_credibility` / `deferred_aspects` 字段**：
+>    > 📎 以下规则是 SKILL.md Step C1.5 `developer_min_depth` 机制的具体化——大多数情况下 `developer_min_depth=2`，
+>    > 因此 `priority=core AND depth<2` 的 KP 通常会被提升到 `synthesis_depth=2`。当 Step C1.5 的 `depth_verdict="escalate"`
+>    > 给出更高值时（如 day15+ 阶段 architecture 类概念的 `developer_min_depth=3`），以 Step C1.5 的值为准。
 >    - `priority=core AND depth < 2 AND 本章需独立编写/执行` → `synthesis_depth = 2`（**强制地板**）
 >    - `priority=core AND depth < 2 AND 属于模板背记或一次性决策` → `synthesis_depth = 1`
 >    - `priority=core AND depth ≥ 2` → `synthesis_depth = depth`
@@ -392,7 +419,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 {遍历 outline.json 中所有 deferred_credibility ≠ null 或 depth < expected_max_depth 的 KP，逐行填写：
  - "本章深度"：当前 synthesis_depth 对应的层级描述（如"depth=1 引介"）
  - "目标深度"：expected_max_depth 对应的层级描述
- - "后续规划"：✅ {confirmed_in 章节} / ❓ 本课程可能不覆盖 / ✅ {正式讲解章节}（隐性知识）
+ - "后续规划"：✅ {next_expected_in} / ❓ 本课程可能不覆盖 / ✅ {正式讲解章节}（隐性知识）
  - "说明"：一句话描述缺口或状态
 
  同时遍历 implicit_concepts（depth=0.5 的隐性知识），填入表格：
@@ -533,7 +560,7 @@ CHAPTER_OUTLINE:    （synthesis/exercises/anki pass 时需要）上一步 outli
 2. **严禁**对 `synthesis_depth ≤ 2` 的内容使用任何推迟注解来替代正文展开——这是 gap_fill 机制的核心约束。正文中不出现"后续深入""扩展了解"等标记，所有后续规划信息统一写入末尾速查表。
 
 3. **速查表收录规则**（根据 `deferred_credibility`，仅适用于 depth≥3 的高阶内容面）：
-   - `"confirmed"` → 速查表"后续规划"列填 `✅ {confirmed_in 章节}`
+   - `"confirmed"` → 速查表"后续规划"列填 `✅ {next_expected_in}`
    - `"speculative"` / `"none"` → 速查表"后续规划"列填 `❓ 本课程可能不覆盖` + 推荐资料
 
 4. **gap_fill_group 位置**：若 outline.json 中存在 `"is_gap_fill": true` 分组，在占位符追加链末尾写入。节结构同常规 KP 节（无特殊标注），对读者完全透明。
@@ -766,7 +793,7 @@ Java全栈::{课程文件夹}::{chapter文件夹}
 ```
 
 **卡片生成规则**：
-- 每个 depth≥1 的核心概念生成 2-4 张（定义 / 代码填空 / 对比 / 原理）
+- 每个 depth≥1 的核心概念生成 2-4 张（定义 / 代码填空 / 版本区别 / 易错点 / 底层原理，5 种卡片类型见 `templates/anki_card.csv`）
 - `priority=core`（⭐）概念优先覆盖，`priority=reference`（🔍）只出最核心的 1-2 张
 - 章节综合中的"贯通洞察"（跨概念关联）单独出 1 张背面较长的综合卡
 - 面试高频题各出 1 张（正面=面试问题，背面=简洁答案）
