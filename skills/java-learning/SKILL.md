@@ -19,10 +19,11 @@ description: >
 - **输出**：`portable-gpu-worker/output/` 下的分层学习材料 — `knowledge_*.md`（视频级）· `CHAPTER_SYNTHESIS`/`CHAPTER_EXERCISES`/`CHAPTER_ANKI`（章节级）
 - **核心约束**：知识内容来自 AI 自身权威知识库，字幕 **仅用于识别话题和教学风格**，不从中直接提取知识
 
-**三条主要流程**：
+**四条工作流程**：
 - **流程 A**（逐视频）：`A1_subtitle_analysis` → `A2_knowledge_gen` → `update_knowledge_graph`
 - **流程 B**（批量）：扫描目录 → `B_batch_coordinator` 协调 → 逐个执行流程A
 - **流程 C**（章节综合）：章节所有视频完成后 → `C_chapter_synthesis` → 完整独立章节手册
+- **流程 D**（阶段地图，可选）：每 3-5 章后 → 生成 `PHASE_MAP.md`（跨章节概念关联图 + 深度追踪）
 
 ---
 
@@ -129,6 +130,23 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
 
 ---
 
+## 术语速查
+
+> 本项目使用四层概念名词，易混淆时参照此表：
+
+| 术语 | 范围 | 含义 | 示例 |
+|------|------|------|------|
+| **Layer**（层级） | 产物体系 | 输出产物的组织层级 | Layer 0=图谱, Layer 1=视频级, Layer 2=章节级, Layer 3=阶段地图 |
+| **Flow**（流程） | 操作序列 | 端到端的处理流程 | Flow A=单视频, Flow B=批量, Flow C=章节综合, Flow D=阶段地图 |
+| **Pass**（轮次） | 流程 C 内部 | 流程 C 的多轮生成步骤 | Pass 1=Outline, Pass 2a=Synthesis, Pass 2b=Exercises, Pass 2c=Anki |
+| **Step**（步骤） | 流程/Pass 内部 | 单个流程或 Pass 中的细分步骤 | Flow A Step 1-6; Pass 1 步骤 O1-ON+1 |
+
+> **处理模式**：`Full` / `Supplement` / `DeepDive` / `Practice` — 均为 PascalCase，对应中文名"完整模式/补充模式/深化模式/实操模式"。
+
+> **safe_stem**：视频文件名去除扩展名后，将 Windows 文件系统禁用字符（`< > : " / \ | ? *`）替换为 `_` 的结果。中文、空格、括号等合法字符保留原样。用于所有产物的文件名和目录名。
+
+---
+
 ## 权威参考资料
 
 | 来源 | 地址 | 用途 |
@@ -217,6 +235,30 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
 | `prompts/C_chapter_synthesis.md` | 流程C Step C3 | 章节所有视频完成后生成完整独立学习手册 |
 | `prompts/0_standalone_system_role.md` | 仅独立对话 | 非 Skill 环境替代本文件（网页版Claude/直接API调用） |
 
+### MCP 工具索引
+
+> MCP Server（`mcp-server/server.py`）提供 17 个工具。各工具调用时机已在流程 A/B/C 步骤中标注，此处为完整清单。
+
+| 工具 | 用途 | 调用时机 |
+|------|------|---------|
+| `check_environment` | 验证依赖是否就绪 | 启动检查 Step 2 |
+| `run_bootstrap` | 初始化环境（venv + MCP 配置） | 启动检查 Step 1（仅首次） |
+| `get_video_metadata` | 获取视频基本信息（时长等） | 流程A Step 2 |
+| `check_preprocessing_status` | 检查预处理完整性，返回产物路径 | 流程A Step 2 |
+| `list_video_files` | 扫描视频目录，列出所有视频 | 流程B Step 1 |
+| `split_long_video` | 按静音点切割 >90min 视频 | 流程A Step 1（长视频） |
+| `get_output_paths` | 获取视频对应的输出目录路径 | 按需调用 |
+| `transcribe_video` | 调用 Whisper 转录字幕 | 预处理（GPU 环境） |
+| `extract_keyframes` | 提取关键帧到 frames/ | 预处理（GPU 环境） |
+| `align_frames_to_transcript` | 帧-字幕对齐辅助 | 【可选】调试帧对齐时 |
+| `query_knowledge_graph` | 按概念范围查询图谱 | 流程A Step 2 第4项 |
+| `update_knowledge_graph` | 更新图谱（强制） | 流程A Step 6 |
+| `read_chapter_summaries` | 读取章节所有视频摘要 | 流程C Step C1 |
+| `scan_chapter_completeness` | 生成章节完整性审计 | 流程C Step C1 |
+| `export_anki_package` | CSV→apkg 导出 | 流程C Pass 2c |
+| `validate_knowledge_graph` | 校验图谱完整性 + 深度分布统计 | 发布前质量检查 |
+| `validate_video_products` | 校验章节视频级产物完整性 | 发布前质量检查 |
+
 ---
 
 ### 启动检查
@@ -298,10 +340,10 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
    → 仅在需要调试帧-字幕对齐时调用（words_json 参数传入 _preprocessing/{safe_stem}_words.json）
 
 4. query_knowledge_graph — 按概念范围查询（不用 list_all=true）
-   Step 4a：根据视频文件名 + 目录路径，预判本视频涉及的概念范围（10-15 个 concept_id）
-   Step 4b：query_knowledge_graph(concept_ids=[预判的 concept_id 列表])
-            → 只返回相关概念，避免图谱庞大时返回全量 JSON 消耗大量 Token
-   ↑ 首次处理（图谱为空）时直接使用 Full Mode，可跳过此步
+   4.1 根据视频文件名 + 目录路径，预判本视频涉及的概念范围（10-15 个 concept_id）
+   4.2 query_knowledge_graph(concept_ids=[预判的 concept_id 列表])
+       → 只返回相关概念，避免图谱庞大时返回全量 JSON 消耗大量 Token
+   ↑ 首次处理（图谱为空）时直接使用 Full Mode，可跳过此子步骤（Step 2 整体不可跳过）
    ↑ 不确定概念 ID 时，可传入话题关键词（工具做模糊匹配）
 ```
 
@@ -413,12 +455,12 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
 
 **触发条件**（任意满足即可）：
 - 用户显式要求（如"帮我整合 day01 的内容"），或 GUI 中选择「⚑ 生成学习包」
-- 最后一个 Session 处理完成后（GUI JSON：`is_resume=false` 且 `current_session_index+1 = total_sessions`）
+- 最后一个 Session 处理完成后（`current_session_index + 1 = total_sessions`）
 - 批量处理（流程 B）完成一个章节时，系统自动询问是否执行流程 C
 
 **Step C1 — 扫描章节状态 + 深度门控准备**
 
-> 本步包含两个子步骤：C1a（工具调用）和 C1b（预合成图谱扫描）。两者均为强制前置，在 C2 策略选择之前完成。
+> 本步包含两个子步骤：C1a（工具调用）和 C1.5（预合成图谱扫描）。两者均为强制前置，在 C2 策略选择之前完成。
 
 > 💡 **兜底机制 2 — 知识完整性核查（C1a 执行，不可省略）**
 
@@ -433,11 +475,11 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
     ⚠️ java.environment_variable：installation 面在视频07提及但未展开 → 建议补充
   → 结果保存为 chapter_completeness_audit.md
   → 【兜底 2 升级】此审计数据在 Outline Pass 中被主动读取：
-    浅层核心概念（priority=core AND depth<2）自动触发 gap_fill_group 插入，
+    浅层核心概念（priority=core AND depth<2）触发 gap_fill 机制，
     强制以 synthesis_depth=2 在综合文档中补写——不再只是诊断报告，而是驱动生成的处方。
-    > **gap_fill 双层机制说明**（KP 级和 Group 级互补）：
-    > - **KP 级**：概念节点上设 `synthesis_treatment="gap_fill"`，驱动 Synthesis Pass 以 synthesis_depth=2 展开该概念
-    > - **Group 级**：outline.json 的 `synthesis_plan.groups` 末尾追加 `{ "is_gap_fill": true, ... }`，将未被常规分组覆盖的浅层概念集中分组
+    > **gap_fill 双层机制说明**（KP 级和 Group 级互补，详细触发规则见 `prompts/C_chapter_synthesis.md` §ON+1）：
+    > - **KP 级**：已在常规分组中的浅层核心概念 → 在对应 KP 上设 `synthesis_treatment="gap_fill"`，驱动 Synthesis Pass 以 synthesis_depth=2 展开
+    > - **Group 级**：**未被任何常规分组覆盖**的浅层核心概念 → outline.json 的 `synthesis_plan.groups` 末尾追加 `{ "is_gap_fill": true, ... }` 集中分组
     > - 两者互补：已在常规分组中的概念只需 KP 级标记（提升写作深度）；未被覆盖的概念同时需要 Group 级（建立分组）+ KP 级（驱动深度）
 ```
 
@@ -511,11 +553,14 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
     规则 B（节级·强制）：outline / synthesis / exercises 三个 pass 内部均必须使用占位符追加链分步写入，
       每次写盘前生成量控制在单次响应安全范围内（参考 3-5 KP，深度大的知识点取低限）
 
-  轻量（知识点 ≤ 15 / 预估产物 ≤ 8000 字，参考值）    → 跳过 Outline Pass，3 轮 Pass（含 C1 共四轮）：synthesis（先执行 Stage 0 分类门）→ exercises → anki
+  轻量（知识点 ≤ 15 / 预估产物 ≤ 8000 字，参考值）    → 不单独执行 Outline Pass（分组/分类逻辑内联到 synthesis pass 的 Stage 0 中），3 轮 Pass（含 C1 共四轮）：synthesis（先执行 Stage 0 分类门 + S0 分组）→ exercises → anki
   标准（知识点 16-40 / 预估产物 8000-20000 字，参考值）→ 4 轮 Pass（含 C1 共五轮）：outline → synthesis → exercises → anki（各 Pass 内部步骤详见 Step C3 表格及 prompts/C_chapter_synthesis.md）
   大型（知识点 > 40 / 预估产物 > 20000 字，参考值）   → N+4 轮 Pass（含 C1 共 N+5 轮）：Group Summaries → Outline → synthesis → exercises → anki
 
 知识点数量：来自 read_chapter_summaries 各视频的 depth≥1 概念汇总。
+
+  注：轻量章节虽不单独执行 Outline Pass，但仍会在 synthesis pass 的 S0 步骤中生成等价的分组信息；
+  chapter_outline.json 文件仅标准/大型章节才会生成。
 ```
 
 **Step C3 — 执行综合生成**
@@ -531,7 +576,7 @@ P5（禁用）    CSDN 旧版文章、知乎感想贴、匿名技术博客、版
   CHAPTER_OUTLINE     = （synthesis/exercises/anki pass 时）使用 read_file 从磁盘加载：
                         {CHAPTER_DIR}/CHAPTER_SYNTHESIS_{chapter_dir_name}/chapter_outline.json
                         （其中 chapter_dir_name = Path(CHAPTER_DIR).name，如 "day01-Java入门"）
-                        轻量章节跳过 outline pass 时此字段为 null
+                        轻量章节不单独执行 outline pass（分组逻辑内联到 synthesis pass S0 步骤中），此字段为 null
 ```
 
 各 Pass 按以下顺序依次执行，每件产物保存后 AI 自行评估剩余容量决定是否继续（规则 A）。**内部步骤与占位符追加链详见 `prompts/C_chapter_synthesis.md`。**

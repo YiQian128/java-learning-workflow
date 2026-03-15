@@ -41,7 +41,7 @@ VIDEOS_DIR, OUTPUT_DIR, PORTABLE_SCRIPTS_DIR = _detect_workspace()
 CONFIG_FILE = PROJECT_ROOT / "config" / "config.yaml"
 MAIN_SCRIPTS_DIR = PROJECT_ROOT / "scripts"
 
-VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm", ".ts"]
+VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm", ".m4v"]
 
 # ── Server init ──────────────────────────────────────────────────────────────
 server = Server("java-learning-workflow")
@@ -335,7 +335,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "csv_path": {"type": "string"},
                     "output_path": {"type": "string"},
-                    "deck_name": {"type": "string", "default": "Java 全栈学习"},
+                    "deck_name": {"type": "string", "default": "Java全栈"},
                     "include_images_dir": {"type": "string"}
                 },
                 "required": ["csv_path", "output_path"]
@@ -531,10 +531,43 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "chapter_dir": {"type": "string", "description": "章节目录路径"},
-                    "course_scope": {
+                    "chapter_dir": {"type": "string", "description": "章节目录路径"}
+                },
+                "required": ["chapter_dir"]
+            }
+        ),
+        Tool(
+            name="validate_knowledge_graph",
+            description=(
+                "校验知识图谱完整性：concept_id 与 key 匹配、display_name 存在、"
+                "depth 不溢出、aspects 为列表、无遗留字段、无断裂引用、"
+                "video_index 有 chapter 字段、磁盘产物对账、first_seen 引用完整性。"
+                "返回问题列表、深度分布统计和摘要，用于发布前质量检查。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "fix": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "是否自动修复可安全修复的问题（如 concept_id/key 不匹配、遗留字段清理）"
+                    }
+                },
+            }
+        ),
+        Tool(
+            name="validate_video_products",
+            description=(
+                "校验指定章节目录下所有视频级产物的完整性和质量：检查 knowledge_*.md "
+                "是否存在、是否截断、字数是否过少、代码块是否闭合；检查 _preprocessing/ "
+                "下的 topics.json 和 teaching_style.json 格式。返回逐视频报告和汇总。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "chapter_dir": {
                         "type": "string",
-                        "description": "课程范围关键词（如 'Java基础'），用于过滤无关概念"
+                        "description": "章节输出目录路径（如 portable-gpu-worker/output/Java基础-视频上/day01-Java入门）"
                     }
                 },
                 "required": ["chapter_dir"]
@@ -564,6 +597,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         "update_knowledge_graph": _update_knowledge_graph,
         "read_chapter_summaries": _read_chapter_summaries,
         "scan_chapter_completeness": _scan_chapter_completeness,
+        "validate_knowledge_graph": _validate_knowledge_graph,
+        "validate_video_products": _validate_video_products,
     }
 
     handler = handlers.get(name)
@@ -882,7 +917,7 @@ async def _export_anki(args: dict) -> list[TextContent]:
                 rc = mod.generate_apkg(
                     csv_path=args["csv_path"],
                     output_path=args["output_path"],
-                    deck_name=args.get("deck_name", "Java 全栈学习"),
+                    deck_name=args.get("deck_name", "Java全栈"),
                     images_dir=args.get("include_images_dir"),
                 )
             return rc
@@ -1804,6 +1839,239 @@ async def _scan_chapter_completeness(args: dict) -> list[TextContent]:
         "shallow_but_important": shallow_but_important,
         "multi_aspect_partial": multi_aspect_partial,
         "audit_content": audit_content
+    }, ensure_ascii=False, indent=2))]
+
+
+async def _validate_knowledge_graph(args: dict) -> list[TextContent]:
+    """校验知识图谱完整性，可选自动修复。"""
+    graph = _load_knowledge_graph()
+    concepts = graph.get("concepts", {})
+    video_index = graph.get("video_index", {})
+    auto_fix = args.get("fix", False)
+
+    CANONICAL_FIELDS = {
+        "concept_id", "display_name", "current_depth", "expected_max_depth",
+        "aspects_covered", "aspects_pending", "first_seen", "first_doc",
+        "seen_count", "last_seen", "implicit_count", "first_implicit_video",
+        "next_expected_in", "related_concepts",
+    }
+    LEGACY_FIELDS = {
+        "label", "max_target_depth", "first_video", "video_appearances", "tags",
+        "category", "name", "prerequisites", "sources", "id", "description",
+        "coverage_history", "video_index", "coverage_count", "name_en",
+        "first_chapter", "first_seen_chapter", "knowledge_doc", "max_depth",
+    }
+
+    issues: list[str] = []
+    fixes_applied: list[str] = []
+
+    for key, c in concepts.items():
+        cid = c.get("concept_id", "")
+        # 1. concept_id must match dict key
+        if cid != key:
+            issues.append(f"ID_MISMATCH: key={key} cid={cid}")
+            if auto_fix:
+                c["concept_id"] = key
+                fixes_applied.append(f"SET concept_id={key}")
+        # 2. display_name
+        if not c.get("display_name"):
+            issues.append(f"NO_DISPLAY_NAME: {key}")
+            if auto_fix:
+                c["display_name"] = c.get("label") or c.get("name") or key.split(".")[-1]
+                fixes_applied.append(f"SET display_name for {key}")
+        # 3. depth bounds
+        depth = c.get("current_depth", 0)
+        emd = c.get("expected_max_depth", 4)
+        if isinstance(depth, (int, float)) and isinstance(emd, (int, float)) and depth > emd:
+            issues.append(f"DEPTH_OVERFLOW: {key} {depth}>{emd}")
+            if auto_fix:
+                c["expected_max_depth"] = depth
+                fixes_applied.append(f"RAISE emd to {depth} for {key}")
+        # 4. first_seen type
+        if isinstance(c.get("first_seen"), dict):
+            issues.append(f"DICT_FIRST_SEEN: {key}")
+            if auto_fix:
+                c["first_seen"] = c["first_seen"].get("video_stem", "")
+                fixes_applied.append(f"FIX dict first_seen for {key}")
+        # 5. aspects types
+        for field in ("aspects_covered", "aspects_pending"):
+            if not isinstance(c.get(field, []), list):
+                issues.append(f"BAD_{field.upper()}: {key}")
+                if auto_fix:
+                    c[field] = []
+                    fixes_applied.append(f"RESET {field} for {key}")
+        # 6. legacy fields
+        for lf in list(c.keys()):
+            if lf in LEGACY_FIELDS:
+                issues.append(f"LEGACY_{lf}: {key}")
+                if auto_fix:
+                    del c[lf]
+                    fixes_applied.append(f"DEL {lf} from {key}")
+        # 7. broken related_concepts refs
+        for ref in c.get("related_concepts", []):
+            if ref not in concepts:
+                issues.append(f"BROKEN_REF: {key} -> {ref}")
+
+    # 8. video_index: missing chapter
+    vi_no_chapter = []
+    for vname, vdata in video_index.items():
+        if isinstance(vdata, dict) and "chapter" not in vdata:
+            vi_no_chapter.append(vname)
+            issues.append(f"VI_NO_CHAPTER: {vname}")
+
+    # 9. disk reconciliation
+    disk_stems: set[str] = set()
+    for course_dir in OUTPUT_DIR.iterdir():
+        if not course_dir.is_dir() or course_dir.name.startswith(("_", ".")):
+            continue
+        for ch_dir in course_dir.iterdir():
+            if not ch_dir.is_dir():
+                continue
+            for vid_dir in ch_dir.iterdir():
+                if vid_dir.is_dir() and not vid_dir.name.startswith(("CHAPTER_SYNTHESIS", "_", ".")):
+                    disk_stems.add(vid_dir.name)
+    missing_from_vi = disk_stems - set(video_index.keys())
+    for s in sorted(missing_from_vi):
+        issues.append(f"NOT_IN_VIDEO_INDEX: {s}")
+
+    if auto_fix and fixes_applied:
+        _save_knowledge_graph(graph)
+
+    # --- Referential integrity: first_seen → video_index ---
+    first_seen_orphans = []
+    for key, c in concepts.items():
+        fs = c.get("first_seen", "")
+        if fs and fs not in video_index:
+            first_seen_orphans.append(f"{key} -> {fs}")
+            issues.append(f"FIRST_SEEN_NOT_IN_VI: {key} -> {fs}")
+
+    # --- Reverse reconciliation: extra in video_index but not on disk ---
+    extra_in_vi = sorted(set(video_index.keys()) - disk_stems) if disk_stems else []
+    for s in extra_in_vi:
+        issues.append(f"EXTRA_IN_VIDEO_INDEX: {s}")
+
+    # --- Depth distribution ---
+    from collections import Counter
+    depth_dist = Counter(c.get("current_depth", 0) for c in concepts.values())
+    issue_types = Counter(i.split(":")[0] for i in issues)
+
+    return [TextContent(type="text", text=json.dumps({
+        "status": "success",
+        "total_concepts": len(concepts),
+        "total_video_index": len(video_index),
+        "total_chapter_progress": len(graph.get("chapter_progress", {})),
+        "total_issues": len(issues),
+        "issue_summary": dict(issue_types),
+        "issues": issues[:100],
+        "fixes_applied": len(fixes_applied),
+        "fix_details": fixes_applied[:50] if auto_fix else [],
+        "disk_videos_not_in_index": sorted(missing_from_vi)[:20],
+        "extra_in_video_index": extra_in_vi[:20],
+        "first_seen_orphans": first_seen_orphans[:10],
+        "depth_distribution": {str(k): v for k, v in sorted(depth_dist.items())},
+    }, ensure_ascii=False, indent=2))]
+
+
+async def _validate_video_products(args: dict) -> list[TextContent]:
+    """校验指定章节下所有视频级产物的完整性。"""
+    chapter_dir = Path(args["chapter_dir"])
+    if not chapter_dir.is_absolute():
+        chapter_dir = PROJECT_ROOT / chapter_dir
+    if not chapter_dir.is_dir():
+        return [TextContent(type="text", text=json.dumps({
+            "status": "error", "message": f"目录不存在: {chapter_dir}"
+        }, ensure_ascii=False))]
+
+    results = []
+    for vid_dir in sorted(chapter_dir.iterdir()):
+        if not vid_dir.is_dir() or vid_dir.name.startswith(("CHAPTER_SYNTHESIS", "_", ".")):
+            continue
+        entry = {"video": vid_dir.name, "issues": [], "info": {}}
+
+        # Check knowledge doc
+        kdocs = list(vid_dir.glob("knowledge_*.md"))
+        if not kdocs:
+            entry["issues"].append("MISSING_KNOWLEDGE_DOC")
+        else:
+            ktext = kdocs[0].read_text(encoding="utf-8", errors="replace")
+            entry["info"]["kdoc_chars"] = len(ktext)
+            # Truncation: odd number of ``` fences
+            if ktext.count("```") % 2 != 0:
+                entry["issues"].append("UNCLOSED_CODE_BLOCK")
+            # Abrupt ending (no newline at end, or ends mid-sentence)
+            if ktext.rstrip() and not ktext.rstrip().endswith((".", "。", "`", ")", "）", "|", "---", "```")):
+                last_line = ktext.rstrip().split("\n")[-1]
+                if len(last_line) > 20 and not last_line.startswith(("#", ">")):
+                    entry["issues"].append(f"POSSIBLE_TRUNCATION: last_line='{last_line[:60]}'")
+            # Very short
+            if len(ktext) < 500:
+                entry["issues"].append(f"VERY_SHORT: {len(ktext)} chars")
+            # Placeholders left behind
+            for ph in ("<!-- PLACEHOLDER", "TODO:", "FIXME:", "[待补充]", "{{"):
+                if ph in ktext:
+                    entry["issues"].append(f"PLACEHOLDER_FOUND: {ph}")
+
+        # Check preprocessing dir
+        prep_dir = vid_dir / "_preprocessing"
+        if not prep_dir.is_dir():
+            entry["issues"].append("MISSING_PREPROCESSING_DIR")
+        else:
+            # topics.json
+            topics_files = list(prep_dir.glob("*_topics.json"))
+            if not topics_files:
+                entry["issues"].append("MISSING_TOPICS_JSON")
+            else:
+                try:
+                    tj = json.loads(topics_files[0].read_text(encoding="utf-8"))
+                    vi = tj.get("video_info", {})
+                    mode = vi.get("processing_mode") or tj.get("processing_mode", "unknown")
+                    entry["info"]["processing_mode"] = mode
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    entry["issues"].append(f"TOPICS_JSON_PARSE_ERROR: {e}")
+
+            # teaching_style.json
+            ts_files = list(prep_dir.glob("*_teaching_style.json"))
+            if not ts_files:
+                entry["issues"].append("MISSING_TEACHING_STYLE_JSON")
+            else:
+                try:
+                    json.loads(ts_files[0].read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    entry["issues"].append(f"TEACHING_STYLE_PARSE_ERROR: {e}")
+
+            # frames
+            frames_dir = prep_dir / "frames"
+            if frames_dir.is_dir():
+                frame_count = len(list(frames_dir.glob("*")))
+                entry["info"]["frame_count"] = frame_count
+                if frame_count == 0:
+                    entry["issues"].append("EMPTY_FRAMES_DIR")
+            else:
+                entry["issues"].append("MISSING_FRAMES_DIR")
+
+            # SRT
+            srt_files = list(prep_dir.glob("*.srt"))
+            if not srt_files:
+                entry["issues"].append("MISSING_SRT")
+
+        results.append(entry)
+
+    # Summary
+    total = len(results)
+    with_issues = sum(1 for r in results if r["issues"])
+    issue_counts: dict[str, int] = {}
+    for r in results:
+        for iss in r["issues"]:
+            tag = iss.split(":")[0]
+            issue_counts[tag] = issue_counts.get(tag, 0) + 1
+
+    return [TextContent(type="text", text=json.dumps({
+        "status": "success",
+        "chapter": chapter_dir.name,
+        "total_videos": total,
+        "videos_with_issues": with_issues,
+        "issue_summary": issue_counts,
+        "details": results,
     }, ensure_ascii=False, indent=2))]
 
 

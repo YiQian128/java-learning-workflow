@@ -132,7 +132,8 @@ output:
   
   # Anki 牌组配置
   anki:
-    deck_name: "Java 全栈学习"
+    # 牌组命名前缀，实际使用 Java全栈::{课程文件夹}::{chapter文件夹} 的层级格式
+    deck_name: "Java全栈"
     # 标签前缀（所有卡片都会加上此前缀）
     tag_prefix: "java"
     # 是否将关键帧图片打包进 .apkg（供 AI 参考的配置项）

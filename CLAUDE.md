@@ -11,9 +11,9 @@
 **最终产物是章节级学习包，不是单个视频的文档。**
 
 视频级处理（流程 A）是管道过程，不是终点。用户实际学习时打开的是：
-- `CHAPTER_SYNTHESIS_{day}.md` — 连贯完整的全章知识文档
-- `CHAPTER_EXERCISES_{day}.md` — 覆盖全章的练习题集
-- `CHAPTER_ANKI_{day}.apkg` — 章节 Anki 卡包
+- `CHAPTER_SYNTHESIS_{chapter_dir_name}.md` — 连贯完整的全章知识文档
+- `CHAPTER_EXERCISES_{chapter_dir_name}.md` — 覆盖全章的练习题集
+- `CHAPTER_ANKI_{chapter_dir_name}.apkg` — 章节 Anki 卡包
 
 视频级文档（`knowledge_*.md`）是原材料，供溯源细节用。
 
@@ -21,7 +21,7 @@
 - **Full Mode**：大量全新概念 → 完整知识文档
 - **Supplement Mode**：已有概念的新侧面 → 只写新内容，引用已有文档
 - **DeepDive Mode**：已有概念达到更高深度 → 从当前深度切入，不重复基础
-- **Practice Mode**：纯实操练习 → 极简步骤文档 + 丰富练习题
+- **Practice Mode**：纯实操练习 → 极简步骤文档（仅步骤/命令/代码，≤1000字）
 
 这意味着：内容高度重叠的视频（如"JDK安装"在"Java介绍"之后）会自动生成短小精悍的 Supplement/Practice 文档，而不是重复解释同一概念。
 
@@ -126,6 +126,11 @@ GUI 关闭后输出 JSON（例）：
 ```
 
 > 说明：`day_path` / `chapter_output_dir` 仍保留绝对路径，便于工具直接调用；但凡需要把路径写回 `chapter_outline.json`、知识图谱、阶段摘要等**持久化产物**时，优先使用对应的 `*_portable` 字段，或先转换为相对于项目根目录的路径。
+>
+> **路径使用规则**：
+> - **MCP 工具参数**：传入绝对路径（`day_path` / `chapter_output_dir`），工具内部自动转换
+> - **持久化产物中写入的路径**（chapter_outline.json、knowledge_graph 等）：必须使用 `*_portable` 相对路径（如 `portable-gpu-worker/output/...`），确保跨机器可移植
+> - **`chapter_dir_name` 推导**：始终取路径末尾目录名（`Path(CHAPTER_DIR).name`），无论输入是绝对路径还是相对路径
 
 **读取这个 JSON 结果，按其中的 `action` 字段执行后续流程：**
 
@@ -146,18 +151,18 @@ GUI 关闭后输出 JSON（例）：
 
 ---
 
-## 三条主要流程
+## 四条工作流程
 
-**详细规范见 `skills/java-learning/SKILL.md`，此处为快速导航：**
+**详细规范见 `skills/java-learning/SKILL.md`，此处为快速导航。**
 
-### 流程 A：单视频差量处理
+### 流程 A：单视频差量处理（Layer 1 产物）
 
-每个视频的处理步骤（**按序执行，批量处理时每个视频都必须完整走完全部 6 步，不可跳过、合并或简化**）：
+每个视频**严格按序执行 6 步**，不可跳过、合并或简化：
 1. 预处理检查（有无 `.srt` 和 `frames/`）
 2. 调用 MCP 工具获取上下文（视频元数据 + 预处理状态 + **知识图谱范围查询**）
 3. 加载 `prompts/A1_subtitle_analysis.md` → 字幕分析 + 图谱比对 + **模式判断**（Full/Supplement/DeepDive/Practice）
 4. 加载 `prompts/A2_knowledge_gen.md` → 按模式生成知识文档（唯一产物：`knowledge_*.md`；练习题/Anki 在流程 C 统一生成）
-5. 产物保存到 `portable-gpu-worker/output/{course}/{day}/{safe_stem}/`（`safe_stem` = 视频文件名中特殊字符替换为 `_` 后的结果）
+5. 产物保存到 `portable-gpu-worker/output/{course}/{day}/{safe_stem}/`（`safe_stem` = 视频文件名去掉扩展名，Windows 禁用字符替换为 `_`）
 6. **调用 `update_knowledge_graph`**（强制，不可省略 — 后续视频模式判断依赖它）
 
 > ❌ **批量处理时严禁的行为**：跳过 Step 2 MCP 调用、跳过 Step 3 Stage 1 分析、合并多个视频一次生成、Step 6 推迟到全部视频处理完后统一调用。每个视频必须独立完整走一遍。
@@ -170,7 +175,7 @@ GUI 关闭后输出 JSON（例）：
 
 **触发时机**（任意满足即可）：
 - 用户明确要求（如“帮我整合 day01”），或 GUI 中选择「⚑ 生成学习包」
-- 最后一个 Session 处理完成后（按 GUI JSON 中 `is_resume=false` 且 `current_session_index+1 = total_sessions`）
+- 最后一个 Session 处理完成后（`current_session_index + 1 = total_sessions`）
 - 批量处理（流程 B）完成一个章节时，系统自动询问是否执行流程 C
 
 > **防溢出机制**：
@@ -185,11 +190,11 @@ GUI 关闭后输出 JSON（例）：
 
 2. **Step C1.5（开发者深度门控，强制，C1 之后 C2 之前）**：遍历本章所有概念，按概念类别和课程阶段计算 `developer_min_depth`，对比图谱 `current_depth` 生成 `depth_verdict`（adequate/escalate/supplement/defer）。结果传入 Outline Pass / 轻量章节 S0，驱动 `synthesis_depth` 和 `depth_gate_result` 决策。详见 SKILL.md §流程C Step C1.5。
 
-3. **Step C2（策略选择）**：根据知识点总数选择 Pass 数（参考值：≤15知识点→3轮Pass；16-40知识点→4轮Pass；>40知识点→N+4轮Pass；均为参考值，实际以返回数据量为准）
+3. **Step C2（策略选择）**：根据知识点总数选择 Pass 数（参考值：≤15知识点→3轮Pass（含 C1 共四轮）；16-40知识点→4轮Pass（含 C1 共五轮）；>40知识点→N+4轮Pass（含 C1 共 N+5 轮）；均为参考值，实际以返回数据量为准）
 
 4. **Step C3（多轮生成）**：加载 `prompts/C_chapter_synthesis.md`，按以下 Pass 顺序依次执行（每件产物保存后 AI 自行评估是否继续，见规则 A）：
    - `PASS_MODE = "outline"`（可选，标准/大型章节）→ 占位符追加链内部分步写入（O1（骨架）→ O2 至 ON（逐组填写 KP）→ ON+1（synthesis_plan），禁止一次性生成完整 JSON），保存 `chapter_outline.json`（含 `synthesis_plan.groups` 分组规划）
-   - `PASS_MODE = "synthesis"` → 读取磁盘 `chapter_outline.json`（标准/大型章节；**轻量章节跳过 outline pass 时，须在 synthesis pass 内先执行 Stage 0 内容价值分类门 + Step C1.5 深度门控**，再按 S0 步骤自动估算分组），使用**占位符追加链**逐组写入生成并保存 `CHAPTER_SYNTHESIS_*.md`（每次写盘前生成量在安全范围内，永不溢出）
+   - `PASS_MODE = "synthesis"` → 读取磁盘 `chapter_outline.json`（标准/大型章节；**轻量章节不单独执行 outline pass，须在 synthesis pass 内先执行 Stage 0 内容价值分类门 + Step C1.5 深度门控**，再按 S0 步骤自动估算分组），使用**占位符追加链**逐组写入生成并保存 `CHAPTER_SYNTHESIS_*.md`（每次写盘前生成量在安全范围内，永不溢出）
    - `PASS_MODE = "exercises"` → 使用占位符追加链逐组写入（`<!-- EXERCISES_PENDING -->`）；读取磁盘 `chapter_outline.json` 获取 `code_anchors` 为主出题锚点；轻量章节（< 8000字）可补充读 SYNTHESIS 全文，标准/大型章节仅依赖 `code_anchors`，不读大文件
    - `PASS_MODE = "anki"` → 读取磁盘 `chapter_outline.json` 的 `code_anchors` + `depth`/`priority` 决定卡片类型和数量；生成 CSV + 调用 `export_anki_package` 打包
 
@@ -198,6 +203,10 @@ GUI 关闭后输出 JSON（例）：
 - `CHAPTER_EXERCISES_{chapter_dir_name}.md` — 全章练习（基于 CHAPTER_SYNTHESIS 从零生成，完整覆盖全章知识点）
 - `CHAPTER_ANKI_{chapter_dir_name}.csv/.apkg` — 章节 Anki 包（基于 CHAPTER_SYNTHESIS 统一从零生成）★
 - `chapter_completeness_audit.md` — 本章待补全清单（未完全讲解的知识点预报）
+
+### 流程 D：阶段性知识地图（可选，Layer 3）
+
+每完成 3-5 个章节后（或用户主动要求），生成 `PHASE_MAP.md`：跨章节概念关联图 + 深度追踪表 + 后续章节预报。详见 SKILL.md §流程D。
 
 ---
 
@@ -210,7 +219,7 @@ portable-gpu-worker/output/
 └── {课程文件夹}/                            如：Java基础-视频上/
     └── {章节文件夹}/                        如：day01-Java入门/
         │
-        ├── {safe_stem}/                    ← Layer 1：视频级产物（每视频一个，safe_stem = 文件名特殊字符替换为 _）
+        ├── {safe_stem}/                    ← Layer 1：视频级产物（每视频一个，safe_stem = 文件名去掉扩展名，Windows禁用字符替换为 _）
         │   ├── knowledge_{safe_stem}.md    ← 唯一视频级产物（Full/Supplement/DeepDive/Practice 之一）
         │   └── _preprocessing/              ← 练习题/Anki 在流程 C 章节综合时从零生成，不在视频级生成
         │       ├── *.srt / *_words.json

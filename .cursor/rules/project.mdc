@@ -25,14 +25,11 @@ python scripts/bootstrap.py
 
 ### 2. 依赖验证
 
-如果 `.venv/` 已存在，快速验证核心依赖：
-```bash
-# Windows
-.venv\Scripts\python -c "import mcp, faster_whisper, genanki, yaml, rich; print('OK')"
-# macOS/Linux
-.venv/bin/python -c "import mcp, faster_whisper, genanki, yaml, rich; print('OK')"
-```
-如果失败，重新安装：
+调用 MCP 工具 `check_environment` 验证依赖是否就绪（工具在进程内用 `importlib` 检测，全平台可靠）：
+
+- ✅ `all_dependencies_ok: true` → **直接进入 Step 3**
+- ❌ `all_dependencies_ok: false` → 查看 `dependencies` 字段找到缺失包，然后安装：
+
 ```bash
 # Windows
 .venv\Scripts\pip install -r mcp-server/requirements.txt

@@ -248,7 +248,7 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
 
 **格式原则**：流畅的教学文档，而非刚性的"卡片表格"。每个章节根据知识点复杂度灵活调整篇幅和结构，不强制每个知识点都有相同的固定子节。
 
-**Full Mode 使用以下模板；Supplement/DeepDive/Practice 模式使用上方对应的固定结构。**
+**Full Mode 遵循以下写法规则（格式模板见 `templates/knowledge_doc.md`）；Supplement/DeepDive/Practice 模式使用上方对应的固定结构。**
 
 → 完整格式结构见 `templates/knowledge_doc.md`（含各模式头部、知识点节格式）
 
@@ -274,7 +274,7 @@ SEGMENT_INDEX:           {分段序号字符串，如 "1/3"}
   - 若 `importance_signals.priority = "high"` → **直接建议插入**（通常已是难点）
   - 若 `importance_signals.priority = "medium"` → 进入第二步进一步验证
 - `type: "interval_supplement"`（定时补充帧）= 场景检测成功时用于填补 >60s 时间空白的间隔帧，默认不插入，除非后续判断为难点
-- `type: "interval"`（内容无关）= 场景检测失败时的兄底间隔帧，**默认不插入**
+- `type: "interval"`（内容无关）= 场景检测失败时的兜底间隔帧，**默认不插入**
 
 **第二步：该帧时间戳是否落在难点区间？**
 参考 `TEACHING_STYLE_JSON` 中的 `difficulty_markers`：
